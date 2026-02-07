@@ -79,8 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         # Read input
         if args.verbose:
             print(f"Reading {args.input}")
-        
-        if args.input.suffix == '.wat':
+
+        if args.input.suffix == ".wat":
             if args.verbose:
                 print("Detected .wat file, converting to WASM format")
             wasm_bytes = convert_wat_to_wasm(args.input.read_text())
@@ -203,7 +203,15 @@ def run_assembler(asm_code: str, target: str, verbose: bool = False) -> bytes:
             # Determine assembler based on target
             if "apple" in target:
                 # Use clang on macOS for better compatibility
-                cmd = ["clang", "-c", "-x", "assembler", temp_asm_path, "-o", temp_obj_path]
+                cmd = [
+                    "clang",
+                    "-c",
+                    "-x",
+                    "assembler",
+                    temp_asm_path,
+                    "-o",
+                    temp_obj_path,
+                ]
             else:
                 # Use as on Linux/other
                 cmd = ["as", temp_asm_path, "-o", temp_obj_path]
@@ -250,9 +258,7 @@ def link_executable(
     """Link object file with runtime to create executable."""
     try:
         # Write the object file to a temp location
-        with tempfile.NamedTemporaryFile(
-            suffix=".o", delete=False
-        ) as temp_obj:
+        with tempfile.NamedTemporaryFile(suffix=".o", delete=False) as temp_obj:
             temp_obj.write(obj_bytes)
             temp_obj_path = temp_obj.name
 
@@ -272,7 +278,8 @@ def link_executable(
             if "apple" in target:
                 cmd = [
                     "clang",
-                    "-o", str(output_path),
+                    "-o",
+                    str(output_path),
                     temp_obj_path,
                     temp_main_path,
                     str(RUNTIME_C_SOURCE),
@@ -281,7 +288,8 @@ def link_executable(
             else:
                 cmd = [
                     "gcc",
-                    "-o", str(output_path),
+                    "-o",
+                    str(output_path),
                     temp_obj_path,
                     temp_main_path,
                     str(RUNTIME_C_SOURCE),
@@ -305,31 +313,33 @@ def link_executable(
 def convert_wat_to_wasm(wat_content: str) -> bytes:
     """Convert WAT text format to WASM binary format using wat2wasm."""
     try:
-        with tempfile.NamedTemporaryFile(suffix='.wat', mode='w', delete=False) as temp_wat:
+        with tempfile.NamedTemporaryFile(
+            suffix=".wat", mode="w", delete=False
+        ) as temp_wat:
             temp_wat.write(wat_content)
             temp_wat_path = temp_wat.name
-        
-        with tempfile.NamedTemporaryFile(suffix='.wasm', delete=False) as temp_wasm:
+
+        with tempfile.NamedTemporaryFile(suffix=".wasm", delete=False) as temp_wasm:
             temp_wasm_path = temp_wasm.name
-        
+
         try:
             # Convert WAT to WASM
             result = subprocess.run(
                 ["wat2wasm", temp_wat_path, "-o", temp_wasm_path],
                 capture_output=True,
                 text=True,
-                check=True
+                check=True,
             )
-            
+
             # Read the resulting WASM binary
             wasm_bytes = Path(temp_wasm_path).read_bytes()
             return wasm_bytes
-            
+
         finally:
             # Clean up temporary files
             Path(temp_wat_path).unlink(missing_ok=True)
             Path(temp_wasm_path).unlink(missing_ok=True)
-            
+
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise RuntimeError(
             "Failed to convert WAT to WASM. "

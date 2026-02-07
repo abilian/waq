@@ -46,4 +46,4 @@ RUNTIME_FUNCTIONS = [
     "__wasm_memory_size",
 ]
 
-__all__ = ["RUNTIME_FUNCTIONS", "RUNTIME_C_SOURCE"]
+__all__ = ["RUNTIME_C_SOURCE", "RUNTIME_FUNCTIONS"]
