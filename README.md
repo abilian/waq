@@ -1,6 +1,6 @@
-# QBEWA - WebAssembly to QBE Compiler
+# WAQ - WebAssembly to QBE Compiler
 
-QBEWA is an ahead-of-time (AOT) compiler that translates WebAssembly binary modules into native machine code using QBE as the backend.
+WAQ is an ahead-of-time (AOT) compiler that translates WebAssembly binary modules into native machine code using QBE as the backend.
 
 ## Features
 
@@ -14,8 +14,9 @@ QBEWA is an ahead-of-time (AOT) compiler that translates WebAssembly binary modu
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/qbewa.git
-cd qbewa
+# (not yet) git clone https://github.com/abilian/waq.git
+git clone https://git.sr.ht/~sfermigier/waq
+cd waq
 
 # Install dependencies using uv
 uv sync
@@ -27,7 +28,7 @@ uv sync
 
 ```bash
 # Compile a WASM file to QBE IL
-qbewa input.wasm -o output.qbe
+waq input.wasm -o output.qbe
 
 # Run tests
 make test
@@ -58,7 +59,7 @@ nox -s check              # Run linting/type checking
 ## Project Structure
 
 ```
-qbewa/
+waq/
 ├── src/
 │   └── waq/              # Main source code
 │       ├── compiler/     # Compilation logic
@@ -69,17 +70,9 @@ qbewa/
 │   ├── a_unit/           # Unit tests
 │   ├── b_integration/    # Integration tests
 │   └── c_e2e/            # End-to-end tests
-├── local-notes/          # Project documentation
+├── notes/                # Technical notes (no documentation yet)
 └── runtime/              # Runtime components
 ```
-
-## Documentation
-
-Comprehensive documentation is available in the `local-notes/` directory:
-
-- **Project Documentation**: Vision, specifications, design decisions
-- **Python Development Guidelines**: Coding standards, testing strategies, design patterns
-- **WASM-to-QBE Transformation**: Detailed compiler specifications
 
 ## Testing
 

@@ -11,6 +11,10 @@ dependencies = [
     "qbepy>=2026.2.1",
 ]
 
+[project.urls]
+Homepage = "https://git.sr.ht/~sfermigier/waq"
+Repository = "https://git.sr.ht/~sfermigier/waq"
+
 [project.scripts]
 waq = "waq:main"
 
