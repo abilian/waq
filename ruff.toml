@@ -1,0 +1,74 @@
+target-version = "py310"
+preview = true
+
+lint.select = [
+    "ALL",
+]
+
+include = [
+    "pyproject.toml",
+    "src/**/*.py",
+    "tests/**/*.py",
+]
+
+lint.extend-ignore = [
+    # Later (or never)
+    "CPY", # Copyright
+    "A",
+    "ANN",
+    "ERA",
+    "FBT",
+    "D",
+    "DOC",
+
+    # False positive (or not)
+    "S101", # Use of `assert` detected
+    "D203", # one-blank-line-before-class
+    "D213", # multi-line-summary-second-line
+    "COM812", # ...
+    "T201", # Print...
+    "PERF401", # list comprehension - explicit append loop is clearer
+
+    # Compiler-specific
+    "PLR2004", # Magic values - opcodes are documented hex constants
+    "C901",    # Complexity - instruction dispatch is naturally complex
+    "PLR0911", # Too many return statements
+    "PLR0912", # Too many branches - opcode dispatch
+    "PLR0914", # Too many local variables
+    "PLR0904", # Too many public methods
+    "PLR0915", # Too many statements
+    "PLR6201", # Use set literal - tuple is clearer for small opcode groups
+    "TD002",   # TODO author
+    "TD003",   # TODO issue link
+    "FIX002",  # Line contains TODO
+    "RUF036",  # None position in union
+    "RUF067",  # __init__ module contents
+    "TRY003",  # Long exception messages
+    "TRY300",  # else block suggestion
+    "EM101",   # Exception string literals
+    "EM102",   # Exception f-strings
+    "TC001",   # Type checking imports
+    "E501",    # Line too long - readability in opcode tables
+]
+
+[lint.extend-per-file-ignores]
+"tests/**/*.py" = [
+    "BLE001", #  blind-except
+    "D",
+    "DOC",
+    "ANN",
+    "PLR2004",
+    "INP001",
+    "PLC0415", # runtime imports for optional dependencies
+    "E501", # line too long in test assertions
+    "N802", # naming
+    "PLR6301", #	no-self-use
+    "ARG001", # 	unused-function-argument
+    "ARG002", # 	unused-method-argument
+    "PLC1901", #	compare-to-empty-string
+]
+
+[lint.isort]
+combine-as-imports = true
+required-imports = ["from __future__ import annotations"]
+known-first-party = ["waq"]

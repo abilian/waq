@@ -1,0 +1,31 @@
+[project]
+name = "waq"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Stefane Fermigier", email = "sf@abilian.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "qbepy>=2026.2.1",
+]
+
+[project.scripts]
+waq = "waq:main"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.19.1",
+    "nox>=2025.11.12",
+    "pre-commit>=4.5.1",
+    "pyrefly>=0.51.1",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "ruff>=0.15.0",
+    "ty>=0.0.15",
+]

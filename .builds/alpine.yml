@@ -1,0 +1,31 @@
+image: alpine/latest
+packages:
+  - uv
+  - gcc
+  - python3-dev
+
+secrets:
+  - b88a4c2c-944c-42a6-9fbb-7483049c458a
+
+sources:
+  - git@git.sr.ht:~sfermigier/waq
+
+tasks:
+  - install: |
+      cd waq
+      uv sync
+  - test: |
+      cd waq
+      uv run pytest -q --tb=short
+  - lint: |
+      cd waq
+      uv run ruff check
+      uv run ty check src
+  - nox: |
+      cd waq
+      uvx nox
+
+triggers:
+  - action: email
+    condition: failure
+    to: sf@fermigier.com

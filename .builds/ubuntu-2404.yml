@@ -1,0 +1,38 @@
+# Copyright (c) 2024, Abilian SAS
+#
+# SPDX-License-Identifier: BSD-3-Clause
+
+image: ubuntu/24.04
+
+packages:
+  # Build tools
+  - software-properties-common
+  - build-essential
+  # Python is 3.12
+  - python3-dev
+  - python3-pip
+  # Extra
+  - nodejs
+
+tasks:
+  - setup: |
+      echo "Building on Ubuntu 2404"
+      sudo pip install --break-system-packages -U uv nox
+      cd waq
+      uv sync
+
+  - test: |
+      cd waq
+      uv run pytest -q --tb=short
+  - lint: |
+      cd waq
+      uv run ruff check
+      # uv run ty check src
+  - nox: |
+      cd waq
+      uvx nox
+
+triggers:
+  - action: email
+    condition: failure
+    to: builds@fermigier.com
