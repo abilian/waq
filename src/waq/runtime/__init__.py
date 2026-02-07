@@ -2,6 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
+# Path to the C runtime source file
+RUNTIME_C_SOURCE = Path(__file__).parent / "waq_runtime.c"
+
 # Runtime function declarations that need to be linked
 RUNTIME_FUNCTIONS = [
     # Integer intrinsics
@@ -41,4 +46,4 @@ RUNTIME_FUNCTIONS = [
     "__wasm_memory_size",
 ]
 
-__all__ = ["RUNTIME_FUNCTIONS"]
+__all__ = ["RUNTIME_FUNCTIONS", "RUNTIME_C_SOURCE"]

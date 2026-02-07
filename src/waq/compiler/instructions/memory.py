@@ -47,7 +47,7 @@ def _vtype_to_ir_type(vtype: ValueType):
 def compile_memory_instruction(
     opcode: int,
     ctx: FunctionContext,
-    mod_ctx: ModuleContext,  # noqa: ARG001
+    mod_ctx: ModuleContext,
     block: Block,
     read_operand: Callable[[str], Any],
 ) -> bool:
@@ -286,7 +286,7 @@ _STORE_OPCODES = {
 def compile_bulk_memory_instruction(
     sub_opcode: int,
     ctx: FunctionContext,
-    mod_ctx: ModuleContext,  # noqa: ARG001
+    mod_ctx: ModuleContext,
     block: Block,
     read_operand: Callable[[str], Any],
 ) -> bool:

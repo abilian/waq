@@ -181,13 +181,11 @@ def compile_exception_instruction(
             block.terminator = Jump(target=Label(frame.end_label))
 
         # Create end block
-        end_block = func.add_block(frame.end_label[1:])
+        return func.add_block(frame.end_label[1:])
 
         # Delegate forwards exceptions to outer handler at 'depth'
         # This is handled by the runtime - we just mark the delegation
         # The runtime will pop our handler and re-throw to the outer one
-
-        return end_block
 
     # catch_all (0x19)
     if opcode == 0x19:

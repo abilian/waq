@@ -49,6 +49,13 @@ lint.extend-ignore = [
     "EM102",   # Exception f-strings
     "TC001",   # Type checking imports
     "E501",    # Line too long - readability in opcode tables
+    "ARG001", # 	unused-function-argument
+    "TRY004", # 	type-check-without-type-error
+    "B007", #   	unused-loop-control-variable
+    "E402", #   	module-import-not-at-top-of-file
+    "PLR0913", #	too-many-arguments
+    "PLR0917", #	too-many-positional-arguments
+    "PLR6301", #	no-self-use
 ]
 
 [lint.extend-per-file-ignores]
@@ -66,6 +73,13 @@ lint.extend-ignore = [
     "ARG001", # 	unused-function-argument
     "ARG002", # 	unused-method-argument
     "PLC1901", #	compare-to-empty-string
+    #
+    "S603", #   	subprocess-without-shell-equals-true
+    "PLW1510", #	subprocess-run-without-check
+    "S607", #   	start-process-with-partial-path
+    "PERF203", #	try-except-in-loop
+    "PLW2901", #	redefined-loop-name
+    "S404", #   	suspicious-subprocess-import
 ]
 
 [lint.isort]

@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 def compile_table_instruction(
     opcode: int,
     ctx: FunctionContext,
-    mod_ctx: ModuleContext,  # noqa: ARG001
+    mod_ctx: ModuleContext,
     block: Block,
     read_operand: Callable[[str], Any],
 ) -> bool:
@@ -76,7 +76,7 @@ def compile_table_instruction(
 def compile_table_bulk_instruction(
     sub_opcode: int,
     ctx: FunctionContext,
-    mod_ctx: ModuleContext,  # noqa: ARG001
+    mod_ctx: ModuleContext,
     block: Block,
     read_operand: Callable[[str], Any],
 ) -> bool:

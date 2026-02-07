@@ -56,7 +56,7 @@ if TYPE_CHECKING:
     from qbepy.ir import Block
 
 
-def compile_module(wasm_module: WasmModule, target: str = "amd64_sysv") -> Module:  # noqa: ARG001
+def compile_module(wasm_module: WasmModule, target: str = "amd64_sysv") -> Module:
     """Compile a WASM module to a QBE module."""
     qbe_module = Module()
 
@@ -96,7 +96,7 @@ def _compile_globals(mod_ctx: ModuleContext, qbe_module: Module) -> None:
         qbe_module.add_data(data)
 
 
-def _eval_init_expr(expr: bytes, mod_ctx: ModuleContext) -> int | float:  # noqa: ARG001
+def _eval_init_expr(expr: bytes, mod_ctx: ModuleContext) -> int | float:
     """Evaluate a constant initialization expression."""
     if not expr:
         return 0

@@ -329,7 +329,7 @@ def _block_type_to_results(
     return func_type.results
 
 
-def _emit_branch(ctx: FunctionContext, block: Block, target: ControlFrame) -> None:  # noqa: ARG001
+def _emit_branch(ctx: FunctionContext, block: Block, target: ControlFrame) -> None:
     """Emit a branch to a control frame."""
     # For loop, branch goes to start (no results needed at branch point)
     # For block/if, branch goes to end with results
