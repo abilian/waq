@@ -21,8 +21,9 @@
 #define WASM_PAGE_SIZE 65536
 #define WASM_MAX_PAGES 65536
 
-static uint8_t *wasm_memory = NULL;
-static uint32_t wasm_memory_pages = 0;
+/* Exported memory pointer - accessed by compiled WASM code */
+uint8_t *__wasm_memory = NULL;
+uint32_t __wasm_memory_size_pages = 0;
 
 /* Integer intrinsics */
 
@@ -166,13 +167,13 @@ void __wasm_trap_out_of_bounds(void) {
 int32_t __wasm_memory_grow(int32_t delta) {
     if (delta < 0) return -1;
 
-    uint32_t old_pages = wasm_memory_pages;
+    uint32_t old_pages = __wasm_memory_size_pages;
     uint32_t new_pages = old_pages + (uint32_t)delta;
 
     if (new_pages > WASM_MAX_PAGES) return -1;
 
     size_t new_size = (size_t)new_pages * WASM_PAGE_SIZE;
-    uint8_t *new_memory = realloc(wasm_memory, new_size);
+    uint8_t *new_memory = realloc(__wasm_memory, new_size);
 
     if (new_memory == NULL && new_size > 0) return -1;
 
@@ -182,19 +183,19 @@ int32_t __wasm_memory_grow(int32_t delta) {
                (size_t)delta * WASM_PAGE_SIZE);
     }
 
-    wasm_memory = new_memory;
-    wasm_memory_pages = new_pages;
+    __wasm_memory = new_memory;
+    __wasm_memory_size_pages = new_pages;
 
     return (int32_t)old_pages;
 }
 
 int32_t __wasm_memory_size(void) {
-    return (int32_t)wasm_memory_pages;
+    return (int32_t)__wasm_memory_size_pages;
 }
 
 /* Memory base pointer for compiled code */
 uint8_t *__wasm_memory_base(void) {
-    return wasm_memory;
+    return __wasm_memory;
 }
 
 /* Initialize runtime */
@@ -206,7 +207,54 @@ void __wasm_runtime_init(uint32_t initial_pages) {
 
 /* Cleanup runtime */
 void __wasm_runtime_cleanup(void) {
-    free(wasm_memory);
-    wasm_memory = NULL;
-    wasm_memory_pages = 0;
+    free(__wasm_memory);
+    __wasm_memory = NULL;
+    __wasm_memory_size_pages = 0;
+}
+
+/* Table support */
+#define WASM_MAX_TABLE_SIZE 65536
+
+/* Exported table pointer - accessed by compiled WASM code */
+void **__wasm_table = NULL;
+uint32_t __wasm_table_size = 0;
+
+int32_t __wasm_table_grow(int32_t delta, void *init_val) {
+    if (delta < 0) return -1;
+
+    uint32_t old_size = __wasm_table_size;
+    uint32_t new_size = old_size + (uint32_t)delta;
+
+    if (new_size > WASM_MAX_TABLE_SIZE) return -1;
+
+    void **new_table = realloc(__wasm_table, new_size * sizeof(void *));
+    if (new_table == NULL && new_size > 0) return -1;
+
+    /* Initialize new entries */
+    for (uint32_t i = old_size; i < new_size; i++) {
+        new_table[i] = init_val;
+    }
+
+    __wasm_table = new_table;
+    __wasm_table_size = new_size;
+
+    return (int32_t)old_size;
+}
+
+int32_t __wasm_table_size_op(void) {
+    return (int32_t)__wasm_table_size;
+}
+
+void *__wasm_table_get(int32_t idx) {
+    if (idx < 0 || (uint32_t)idx >= __wasm_table_size) {
+        __wasm_trap_out_of_bounds();
+    }
+    return __wasm_table[idx];
+}
+
+void __wasm_table_set(int32_t idx, void *val) {
+    if (idx < 0 || (uint32_t)idx >= __wasm_table_size) {
+        __wasm_trap_out_of_bounds();
+    }
+    __wasm_table[idx] = val;
 }

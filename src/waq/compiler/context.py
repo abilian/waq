@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from waq.parser.module import ExportKind, WasmModule
+from waq.parser.module import ExportKind, ImportKind, WasmModule
 from waq.parser.types import FuncType, ValueType
 
 from .stack import ValueStack
@@ -143,6 +143,22 @@ class ModuleContext:
         """
         if func_idx in self.func_names:
             return self.func_names[func_idx]
+
+        # Check if it's an imported function
+        num_imports = self.module.num_imported_funcs()
+        if func_idx < num_imports:
+            # Find the import
+            import_idx = 0
+            for imp in self.module.imports:
+                if imp.kind == ImportKind.FUNC:
+                    if import_idx == func_idx:
+                        # Use module$name format for imported functions
+                        # This allows linking with external C functions
+                        name = imp.name
+                        self.func_names[func_idx] = name
+                        return name
+                    import_idx += 1
+            raise ValueError(f"imported function {func_idx} not found")
 
         # Check if exported
         for exp in self.module.exports:

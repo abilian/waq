@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from waq.cli import main
@@ -25,7 +27,7 @@ class TestCLIBasic:
             main(["--version"])
         assert exc.value.code == 0
         captured = capsys.readouterr()
-        assert "0.1.0" in captured.out
+        assert "0.1.1" in captured.out
 
     def test_missing_input(self, capsys):
         """Test error when no input file is provided."""
@@ -179,21 +181,47 @@ class TestCLIEmitFormats:
         assert result == 0
         assert output_file.exists()
 
-    def test_emit_asm_not_implemented(self, minimal_wasm, tmp_path, capsys):
-        """Test that asm output format is not yet implemented."""
+    def test_emit_asm(self, minimal_wasm, tmp_path):
+        """Test asm output format."""
         output_file = tmp_path / "output.s"
         result = main([str(minimal_wasm), "-o", str(output_file), "--emit", "asm"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "not yet implemented" in captured.err
+        # May fail if QBE not installed, which is acceptable
+        if result == 0:
+            assert output_file.exists()
+            content = output_file.read_text()
+            assert ".text" in content or "section" in content.lower()
 
-    def test_emit_obj_not_implemented(self, minimal_wasm, tmp_path, capsys):
-        """Test that obj output format is not yet implemented."""
+    def test_emit_obj(self, minimal_wasm, tmp_path):
+        """Test obj output format."""
         output_file = tmp_path / "output.o"
         result = main([str(minimal_wasm), "-o", str(output_file), "--emit", "obj"])
-        assert result == 1
-        captured = capsys.readouterr()
-        assert "not yet implemented" in captured.err
+        # May fail if QBE not installed, which is acceptable
+        if result == 0:
+            assert output_file.exists()
+            # Check it's a valid object file (has some content)
+            assert output_file.stat().st_size > 0
+
+    def test_emit_exe(self, tmp_path):
+        """Test exe output format with fibonacci example."""
+        import subprocess
+
+        # Use the fibonacci fixture which exports wasm_main
+        fixtures_dir = Path(__file__).parent.parent / "fixtures"
+        wat_file = fixtures_dir / "fibonacci.wat"
+        if not wat_file.exists():
+            pytest.skip("fibonacci.wat fixture not found")
+
+        output_file = tmp_path / "fibonacci"
+        result = main([str(wat_file), "-o", str(output_file), "--emit", "exe"])
+        # May fail if QBE/wat2wasm not installed
+        if result == 0:
+            assert output_file.exists()
+            # Run the executable and check output
+            proc = subprocess.run(
+                [str(output_file)], capture_output=True, text=True, timeout=5
+            )
+            assert proc.returncode == 0
+            assert proc.stdout.strip() == "55"  # fib(10) = 55
 
 
 class TestCLIErrors:

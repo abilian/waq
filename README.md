@@ -22,15 +22,60 @@ cd waq
 uv sync
 ```
 
+### External Dependencies
+
+WAQ requires the following external tools depending on output format:
+
+| Output | Required Tools |
+|--------|----------------|
+| `--emit qbe` | None |
+| `--emit asm` | [QBE](https://c9x.me/compile/) |
+| `--emit obj` | QBE + assembler (clang/as) |
+| `--emit exe` | QBE + C compiler (clang/gcc) |
+| `.wat` input | [wabt](https://github.com/WebAssembly/wabt) (wat2wasm) |
+
 ## Usage
 
 ### Basic Compilation
 
 ```bash
 # Compile a WASM file to QBE IL
-waq input.wasm -o output.qbe
+waq input.wasm -o output.ssa
 
-# Run tests
+# Compile a WAT file (automatically converted via wat2wasm)
+waq input.wat -o output.ssa
+
+# Compile to assembly
+waq input.wasm --emit asm -o output.s
+
+# Compile to object file
+waq input.wasm --emit obj -o output.o
+
+# Compile to executable (requires exported wasm_main function)
+waq input.wasm --emit exe -o program
+
+# Specify a different entry function
+waq input.wasm --emit exe --entry my_main -o program
+
+# For void functions, use --no-print
+waq input.wasm --emit exe --entry void_func --no-print -o program
+
+# Target a specific architecture
+waq input.wasm --emit exe -t arm64_apple -o program
+```
+
+### Supported Targets
+
+- `amd64_sysv` - x86-64 Linux/BSD (default)
+- `amd64_apple` - x86-64 macOS
+- `arm64` - ARM64 Linux
+- `arm64_apple` - ARM64 macOS (Apple Silicon)
+- `rv64` - RISC-V 64-bit
+
+### Running Tests
+
+```bash
+# Run all tests
 make test
 
 # Run specific test types

@@ -65,13 +65,147 @@ def compile_module(wasm_module: WasmModule, target: str = "amd64_sysv") -> Modul
     # Compile globals
     _compile_globals(mod_ctx, qbe_module)
 
+    # Compile data segments
+    _compile_data_segments(mod_ctx, qbe_module)
+
     # Compile functions
     num_imports = wasm_module.num_imported_funcs()
     for i, body in enumerate(wasm_module.code):
         func_idx = num_imports + i
         _compile_function(mod_ctx, qbe_module, func_idx, body)
 
+    # Always generate memory/table initialization function
+    # (main stub always calls it)
+    _compile_memory_init(mod_ctx, qbe_module)
+
     return qbe_module
+
+
+def _compile_data_segments(mod_ctx: ModuleContext, qbe_module: Module) -> None:
+    """Compile data segments as QBE data definitions."""
+    for i, segment in enumerate(mod_ctx.module.data):
+        if segment.memory_idx == -1:
+            # Passive segment - just store the data, will be used by memory.init
+            data_name = f"__wasm_data_{i}"
+        else:
+            # Active segment - will be copied to memory at init
+            data_name = f"__wasm_data_{i}"
+
+        data_def = DataDef(data_name)
+        # Add raw bytes
+        data_def.items.append(("b", list(segment.data)))
+        qbe_module.add_data(data_def)
+
+
+def _compile_memory_init(mod_ctx: ModuleContext, qbe_module: Module) -> None:
+    """Generate memory and table initialization function."""
+    # Create __wasm_memory_init function that:
+    # 1. Initializes memory (calls __wasm_memory_grow for initial pages)
+    # 2. Copies active data segments to memory
+    # 3. Initializes tables and element segments
+
+    init_func = Function("__wasm_memory_init", return_type=None, params=[], export=True)
+    entry_block = init_func.add_block("entry")
+
+    # Initialize memory with initial pages
+    if mod_ctx.module.memories:
+        mem = mod_ctx.module.memories[0]
+        initial_pages = mem.limits.min
+        if initial_pages > 0:
+            entry_block.instructions.append(
+                Call(
+                    target=Global("__wasm_memory_grow"),
+                    args=[(W, IntConst(initial_pages))],
+                )
+            )
+
+    # Copy active data segments
+    for i, segment in enumerate(mod_ctx.module.data):
+        if segment.memory_idx == -1:
+            continue  # Skip passive segments
+
+        # Evaluate offset expression
+        offset = _eval_init_expr(segment.offset_expr, mod_ctx)
+        data_len = len(segment.data)
+
+        if data_len == 0:
+            continue
+
+        # Get memory base pointer
+        mem_base = f"mem_base_{i}"
+        entry_block.instructions.append(
+            Call(
+                target=Global("__wasm_memory_base"),
+                args=[],
+                result=Temporary(mem_base),
+                result_type=L,
+            )
+        )
+
+        # Calculate destination address: mem_base + offset
+        dest_addr = f"dest_{i}"
+        entry_block.instructions.append(
+            BinaryOp(
+                result=Temporary(dest_addr),
+                result_type=L,
+                op="add",
+                left=Temporary(mem_base),
+                right=IntConst(int(offset)),
+            )
+        )
+
+        # Call memcpy to copy data segment
+        # void *memcpy(void *dest, const void *src, size_t n)
+        entry_block.instructions.append(
+            Call(
+                target=Global("memcpy"),
+                args=[
+                    (L, Temporary(dest_addr)),
+                    (L, Global(f"__wasm_data_{i}")),
+                    (L, IntConst(data_len)),
+                ],
+            )
+        )
+
+    # Initialize tables
+    if mod_ctx.module.tables:
+        table = mod_ctx.module.tables[0]
+        initial_size = table.limits.min
+        if initial_size > 0:
+            entry_block.instructions.append(
+                Call(
+                    target=Global("__wasm_table_grow"),
+                    args=[(W, IntConst(initial_size)), (L, IntConst(0))],
+                )
+            )
+
+    # Initialize element segments
+    for elem_seg in mod_ctx.module.elements:
+        if elem_seg.table_idx < 0:
+            continue  # Skip passive segments
+
+        # Evaluate offset expression
+        offset = _eval_init_expr(elem_seg.offset_expr, mod_ctx)
+
+        # For each function index, set the table entry
+        for j, func_idx in enumerate(elem_seg.func_indices):
+            # Calculate table index
+            table_idx = int(offset) + j
+            func_name = mod_ctx.get_func_name(func_idx)
+
+            # Set table[table_idx] = func_ptr
+            entry_block.instructions.append(
+                Call(
+                    target=Global("__wasm_table_set"),
+                    args=[
+                        (W, IntConst(table_idx)),
+                        (L, Global(func_name)),
+                    ],
+                )
+            )
+
+    entry_block.terminator = Return(value=None)
+    qbe_module.add_function(init_func)
 
 
 def _compile_globals(mod_ctx: ModuleContext, qbe_module: Module) -> None:
@@ -334,7 +468,7 @@ def _compile_instruction(
 
     # Try control flow instructions
     result = compile_control_instruction(
-        opcode, func_ctx, qbe_func, block, read_operand
+        opcode, func_ctx, mod_ctx, qbe_func, block, read_operand
     )
     if result is not None or opcode in range(0x12):
         return result

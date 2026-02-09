@@ -22,7 +22,7 @@ from qbepy.ir import (
     W,
 )
 
-from waq.compiler.context import ControlFrame
+from waq.compiler.context import ControlFrame, ModuleContext
 from waq.parser.types import BlockType, ValueType
 
 if TYPE_CHECKING:
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
 def compile_control_instruction(
     opcode: int,
     ctx: FunctionContext,
+    mod_ctx: ModuleContext,
     func: Function,
     block: Block,
     read_operand: Callable[[str], Any],
@@ -303,7 +304,7 @@ def compile_control_instruction(
     # call
     if opcode == 0x10:
         func_idx = read_operand("u32")
-        _emit_call(ctx, block, func_idx)
+        _emit_call(ctx, mod_ctx, block, func_idx)
         return None
 
     # call_indirect
@@ -366,7 +367,9 @@ def _vtype_to_ir_type(vtype: ValueType):
     raise ValueError(f"unknown value type: {vtype}")
 
 
-def _emit_call(ctx: FunctionContext, block: Block, func_idx: int) -> None:
+def _emit_call(
+    ctx: FunctionContext, mod_ctx: ModuleContext, block: Block, func_idx: int
+) -> None:
     """Emit a function call."""
 
     # Get function type
@@ -381,9 +384,8 @@ def _emit_call(ctx: FunctionContext, block: Block, func_idx: int) -> None:
         qbe_type = _vtype_to_ir_type(ptype)
         call_args.append((qbe_type, Temporary(arg.name)))
 
-    # Get function name (we need ModuleContext for this)
-    # For now, generate a placeholder
-    func_name = f"__wasm_func_{func_idx}"
+    # Get function name from module context (handles imports properly)
+    func_name = mod_ctx.get_func_name(func_idx)
 
     # Emit call
     if not func_type.results:

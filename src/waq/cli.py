@@ -56,6 +56,12 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     parser.add_argument(
+        "--no-print",
+        action="store_true",
+        help="Don't print result in exe output (for void functions)",
+    )
+
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",
@@ -65,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--version",
         action="version",
-        version="waq 0.1.0",
+        version="waq 0.1.1",
     )
 
     args = parser.parse_args(argv)
@@ -123,7 +129,12 @@ def main(argv: list[str] | None = None) -> int:
             asm_code = run_qbe(qbe_il, args.target, args.verbose)
             obj_bytes = run_assembler(asm_code, args.target, args.verbose)
             link_executable(
-                obj_bytes, args.output, args.entry, args.target, args.verbose
+                obj_bytes,
+                args.output,
+                args.entry,
+                args.target,
+                args.verbose,
+                print_result=not args.no_print,
             )
 
         if args.verbose:
@@ -156,7 +167,7 @@ def run_qbe(qbe_il: str, target: str, verbose: bool = False) -> str:
     """Run QBE to convert QBE IL to assembly."""
     try:
         with tempfile.NamedTemporaryFile(
-            suffix=".ssa", mode="w", delete=False
+            suffix=".ssa", mode="w", delete=False, encoding="utf-8"
         ) as temp_ssa:
             temp_ssa.write(qbe_il)
             temp_ssa_path = temp_ssa.name
@@ -188,7 +199,7 @@ def run_assembler(asm_code: str, target: str, verbose: bool = False) -> bytes:
     """Run the assembler to convert assembly to object file."""
     try:
         with tempfile.NamedTemporaryFile(
-            suffix=".s", mode="w", delete=False
+            suffix=".s", mode="w", delete=False, encoding="utf-8"
         ) as temp_asm:
             temp_asm.write(asm_code)
             temp_asm_path = temp_asm.name
@@ -231,18 +242,33 @@ def run_assembler(asm_code: str, target: str, verbose: bool = False) -> bytes:
         ) from e
 
 
-def generate_main_stub(entry_function: str) -> str:
+def generate_main_stub(entry_function: str, *, print_result: bool = True) -> str:
     """Generate a C main() stub that calls the WASM entry function."""
     # Use the plain function name - C compiler handles mangling
-    return f"""\
+    if print_result:
+        return f"""\
 /* Generated main stub for WAQ */
 #include <stdio.h>
 
+extern void __wasm_memory_init(void);
 extern int {entry_function}(void);
 
 int main(void) {{
+    __wasm_memory_init();
     int result = {entry_function}();
     printf("%d\\n", result);
+    return 0;
+}}
+"""
+    return f"""\
+/* Generated main stub for WAQ */
+
+extern void __wasm_memory_init(void);
+extern void {entry_function}(void);
+
+int main(void) {{
+    __wasm_memory_init();
+    {entry_function}();
     return 0;
 }}
 """
@@ -254,6 +280,8 @@ def link_executable(
     entry_function: str,
     target: str,
     verbose: bool = False,
+    *,
+    print_result: bool = True,
 ) -> None:
     """Link object file with runtime to create executable."""
     try:
@@ -263,9 +291,9 @@ def link_executable(
             temp_obj_path = temp_obj.name
 
         # Generate and write the main stub
-        main_stub = generate_main_stub(entry_function)
+        main_stub = generate_main_stub(entry_function, print_result=print_result)
         with tempfile.NamedTemporaryFile(
-            suffix=".c", mode="w", delete=False
+            suffix=".c", mode="w", delete=False, encoding="utf-8"
         ) as temp_main:
             temp_main.write(main_stub)
             temp_main_path = temp_main.name
@@ -314,7 +342,7 @@ def convert_wat_to_wasm(wat_content: str) -> bytes:
     """Convert WAT text format to WASM binary format using wat2wasm."""
     try:
         with tempfile.NamedTemporaryFile(
-            suffix=".wat", mode="w", delete=False
+            suffix=".wat", mode="w", delete=False, encoding="utf-8"
         ) as temp_wat:
             temp_wat.write(wat_content)
             temp_wat_path = temp_wat.name
@@ -324,7 +352,7 @@ def convert_wat_to_wasm(wat_content: str) -> bytes:
 
         try:
             # Convert WAT to WASM
-            result = subprocess.run(
+            subprocess.run(
                 ["wat2wasm", temp_wat_path, "-o", temp_wasm_path],
                 capture_output=True,
                 text=True,
@@ -332,8 +360,7 @@ def convert_wat_to_wasm(wat_content: str) -> bytes:
             )
 
             # Read the resulting WASM binary
-            wasm_bytes = Path(temp_wasm_path).read_bytes()
-            return wasm_bytes
+            return Path(temp_wasm_path).read_bytes()
 
         finally:
             # Clean up temporary files
@@ -345,7 +372,7 @@ def convert_wat_to_wasm(wat_content: str) -> bytes:
             "Failed to convert WAT to WASM. "
             "Ensure wat2wasm is installed (part of WebAssembly binary toolkit). "
             f"Error: {e}"
-        )
+        ) from e
 
 
 if __name__ == "__main__":

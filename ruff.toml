@@ -59,6 +59,11 @@ lint.extend-ignore = [
 ]
 
 [lint.extend-per-file-ignores]
+"src/waq/cli.py" = [
+    "S404",  # subprocess import - CLI invokes QBE, assembler, linker
+    "S603",  # subprocess call - needed for external tool invocation
+    "S607",  # partial path - tools are expected to be in PATH
+]
 "tests/**/*.py" = [
     "BLE001", #  blind-except
     "D",

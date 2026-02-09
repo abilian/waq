@@ -619,6 +619,32 @@ class TestModuleContext:
         # No $ prefix - qbepy adds it
         assert name == "__wasm_global_0"
 
+    def test_get_func_name_imported(self):
+        """Test getting name for imported function."""
+        from waq.parser.module import Import, ImportKind
+
+        module = WasmModule()
+        module.imports = [Import("env", "add_numbers", ImportKind.FUNC, 0)]
+
+        ctx = ModuleContext(module=module)
+        name = ctx.get_func_name(0)
+        # Imported functions use their import name
+        assert name == "add_numbers"
+
+    def test_get_func_name_after_import(self):
+        """Test function index offset for functions after imports."""
+        from waq.parser.module import Export, Import, ImportKind
+
+        module = WasmModule()
+        module.imports = [Import("env", "add_numbers", ImportKind.FUNC, 0)]
+        module.exports = [Export("my_func", ExportKind.FUNC, 1)]  # After import
+
+        ctx = ModuleContext(module=module)
+        # First function is imported
+        assert ctx.get_func_name(0) == "add_numbers"
+        # Second function is exported
+        assert ctx.get_func_name(1) == "my_func"
+
 
 class TestFunctionContext:
     """Tests for FunctionContext."""

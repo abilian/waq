@@ -207,3 +207,116 @@ class TestGlobals:
         """Test global counter increment."""
         wat_file = FIXTURES_DIR / "global.wat"
         compile_and_run(wat_file, expected_result=4)
+
+
+def compile_and_run_with_imports(
+    wat_file: Path, env_c_code: str, entry_func: str, expected_result: int | None = None
+) -> int:
+    """Compile a WAT file with C-provided imports and run it.
+
+    Args:
+        wat_file: Path to WAT file
+        env_c_code: C code that provides imported functions
+        entry_func: Name of the exported function to call
+        expected_result: Expected return value
+
+    Returns the exit code of the program.
+    """
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmpdir = Path(tmpdir)
+
+        # Step 1: WAT -> WASM (using wat2wasm)
+        wasm_file = tmpdir / "program.wasm"
+        result = subprocess.run(
+            ["wat2wasm", str(wat_file), "-o", str(wasm_file)],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"wat2wasm failed: {result.stderr}")
+
+        # Step 2: WASM -> QBE IL (using waq)
+        ssa_file = tmpdir / "program.ssa"
+        exit_code = waq_main([str(wasm_file), "-o", str(ssa_file)])
+        if exit_code != 0:
+            raise RuntimeError("waq compilation failed")
+
+        # Step 3: QBE IL -> Assembly (using qbe)
+        asm_file = tmpdir / "program.s"
+        result = subprocess.run(
+            ["qbe", "-o", str(asm_file), str(ssa_file)], capture_output=True, text=True
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"qbe failed: {result.stderr}")
+
+        # Step 4: Create env.c with imported functions
+        env_c = tmpdir / "env.c"
+        env_c.write_text(env_c_code)
+
+        # Step 5: Create main.c wrapper
+        main_c = tmpdir / "main.c"
+        main_c.write_text(f"""
+#include <stdio.h>
+#include <stdlib.h>
+#include "wasm_runtime.h"
+
+extern int {entry_func}(void);
+
+int main(void) {{
+    __wasm_init(1);
+    int result = {entry_func}();
+    __wasm_fini();
+    return result;
+}}
+""")
+
+        # Step 6: Compile and link
+        runtime_obj = build_runtime()
+        exe_file = tmpdir / "program"
+
+        result = subprocess.run(
+            [
+                "clang",
+                "-o",
+                str(exe_file),
+                str(main_c),
+                str(env_c),
+                str(asm_file),
+                str(runtime_obj),
+                f"-I{RUNTIME_DIR}",
+                "-lm",
+            ],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(f"clang linking failed: {result.stderr}")
+
+        # Step 7: Run the program
+        result = subprocess.run([str(exe_file)], capture_output=True, text=True)
+
+        if expected_result is not None:
+            assert result.returncode == expected_result, (
+                f"Expected {expected_result}, got {result.returncode}"
+            )
+
+        return result.returncode
+
+
+class TestImports:
+    """Import tests."""
+
+    def test_import_function(self):
+        """Test calling an imported function: add_numbers(30, 12) = 42."""
+        wat_file = FIXTURES_DIR / "import.wat"
+
+        env_code = """
+#include <stdint.h>
+
+int32_t add_numbers(int32_t a, int32_t b) {
+    return a + b;
+}
+"""
+        compile_and_run_with_imports(
+            wat_file, env_code, "test_import", expected_result=42
+        )

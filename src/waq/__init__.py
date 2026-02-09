@@ -10,7 +10,7 @@ from waq.cli import main
 from waq.compiler import compile_module
 from waq.parser.module import WasmModule, parse_module
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "WasmModule",
