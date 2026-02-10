@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import platform
 import subprocess
 import sys
 import tempfile
@@ -12,6 +13,27 @@ from waq.compiler import compile_module
 from waq.errors import CompileError, ParseError, ValidationError
 from waq.parser.module import parse_module
 from waq.runtime import RUNTIME_C_SOURCE
+
+
+def detect_target() -> str:
+    """Auto-detect the QBE target for the current platform."""
+    system = platform.system().lower()
+    machine = platform.machine().lower()
+
+    if system == "darwin":
+        # macOS
+        if machine in ("arm64", "aarch64"):
+            return "arm64_apple"
+        return "amd64_apple"
+    elif system == "linux":
+        if machine in ("arm64", "aarch64"):
+            return "arm64"
+        elif machine in ("riscv64",):
+            return "rv64"
+        return "amd64_sysv"
+    else:
+        # Default to System V ABI for unknown systems
+        return "amd64_sysv"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -34,12 +56,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Output file (default: input with appropriate extension)",
     )
 
+    default_target = detect_target()
     parser.add_argument(
         "-t",
         "--target",
         choices=["amd64_sysv", "amd64_apple", "arm64", "arm64_apple", "rv64"],
-        default="amd64_sysv",
-        help="Target architecture (default: amd64_sysv)",
+        default=default_target,
+        help=f"Target architecture (default: {default_target})",
     )
 
     parser.add_argument(
@@ -51,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.add_argument(
         "--entry",
-        default="wasm_main",
-        help="Entry function name for exe output (default: wasm_main)",
+        default="main",
+        help="Entry function name for exe output (default: main)",
     )
 
     parser.add_argument(
@@ -242,20 +265,36 @@ def run_assembler(asm_code: str, target: str, verbose: bool = False) -> bytes:
         ) from e
 
 
+def mangle_export_name(name: str) -> str:
+    """Get the native symbol name for a WASM export.
+
+    WASM exports are prefixed with wasm_ to avoid conflicts with C symbols,
+    except for _start which is the WASI entry point.
+    """
+    if name == "_start":
+        return "_start"
+    return f"wasm_{name}"
+
+
 def generate_main_stub(entry_function: str, *, print_result: bool = True) -> str:
-    """Generate a C main() stub that calls the WASM entry function."""
-    # Use the plain function name - C compiler handles mangling
+    """Generate a C main() stub that calls the WASM entry function.
+
+    The entry_function should be the WASM export name; it will be mangled
+    to match the compiled symbol name.
+    """
+    # Apply name mangling to match compiled output
+    native_name = mangle_export_name(entry_function)
     if print_result:
         return f"""\
 /* Generated main stub for WAQ */
 #include <stdio.h>
 
 extern void __wasm_memory_init(void);
-extern int {entry_function}(void);
+extern int {native_name}(void);
 
 int main(void) {{
     __wasm_memory_init();
-    int result = {entry_function}();
+    int result = {native_name}();
     printf("%d\\n", result);
     return 0;
 }}
@@ -264,12 +303,11 @@ int main(void) {{
 /* Generated main stub for WAQ */
 
 extern void __wasm_memory_init(void);
-extern void {entry_function}(void);
+extern int {native_name}(void);
 
 int main(void) {{
     __wasm_memory_init();
-    {entry_function}();
-    return 0;
+    return {native_name}();
 }}
 """
 

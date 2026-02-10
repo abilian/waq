@@ -1909,3 +1909,124 @@ void __wasm_v128_const(v128_t *result, uint64_t low, uint64_t high) {
     result->u64[0] = low;
     result->u64[1] = high;
 }
+
+/* ---- WASI Function Aliases (without __wasi_ prefix) ---- */
+/* WASM imports use short names like "proc_exit", not "__wasi_proc_exit" */
+
+void proc_exit(int32_t code) {
+    __wasi_proc_exit(code);
+}
+
+__wasi_errno_t args_sizes_get(uint32_t *argc_out, uint32_t *argv_buf_size_out) {
+    return __wasi_args_sizes_get(argc_out, argv_buf_size_out);
+}
+
+__wasi_errno_t args_get(uint32_t argv_ptr, uint32_t argv_buf_ptr) {
+    return __wasi_args_get(argv_ptr, argv_buf_ptr);
+}
+
+__wasi_errno_t environ_sizes_get(uint32_t *count_out, uint32_t *buf_size_out) {
+    return __wasi_environ_sizes_get(count_out, buf_size_out);
+}
+
+__wasi_errno_t environ_get(uint32_t environ_ptr, uint32_t environ_buf_ptr) {
+    return __wasi_environ_get(environ_ptr, environ_buf_ptr);
+}
+
+__wasi_errno_t fd_close(int32_t fd) {
+    return __wasi_fd_close(fd);
+}
+
+__wasi_errno_t fd_write(int32_t fd, uint32_t iovs_ptr, uint32_t iovs_len, uint32_t nwritten_ptr) {
+    return __wasi_fd_write(fd, iovs_ptr, iovs_len, nwritten_ptr);
+}
+
+__wasi_errno_t fd_read(int32_t fd, uint32_t iovs_ptr, uint32_t iovs_len, uint32_t nread_ptr) {
+    return __wasi_fd_read(fd, iovs_ptr, iovs_len, nread_ptr);
+}
+
+__wasi_errno_t fd_seek(int32_t fd, int64_t offset, uint8_t whence, uint32_t newoffset_ptr) {
+    return __wasi_fd_seek(fd, offset, whence, newoffset_ptr);
+}
+
+__wasi_errno_t fd_tell(int32_t fd, uint32_t offset_ptr) {
+    return __wasi_fd_tell(fd, offset_ptr);
+}
+
+__wasi_errno_t fd_sync(int32_t fd) {
+    return __wasi_fd_sync(fd);
+}
+
+__wasi_errno_t fd_fdstat_get(int32_t fd, uint32_t stat_ptr) {
+    return __wasi_fd_fdstat_get(fd, stat_ptr);
+}
+
+__wasi_errno_t fd_prestat_get(int32_t fd, uint32_t prestat_ptr) {
+    return __wasi_fd_prestat_get(fd, prestat_ptr);
+}
+
+__wasi_errno_t fd_prestat_dir_name(int32_t fd, uint32_t path_ptr, uint32_t path_len) {
+    return __wasi_fd_prestat_dir_name(fd, path_ptr, path_len);
+}
+
+__wasi_errno_t path_open(
+    int32_t fd,
+    uint32_t dirflags,
+    uint32_t path_ptr,
+    uint32_t path_len,
+    uint32_t oflags,
+    uint64_t fs_rights_base,
+    uint64_t fs_rights_inheriting,
+    uint16_t fdflags,
+    uint32_t opened_fd_ptr
+) {
+    return __wasi_path_open(fd, dirflags, path_ptr, path_len, oflags,
+                            fs_rights_base, fs_rights_inheriting, fdflags, opened_fd_ptr);
+}
+
+__wasi_errno_t path_create_directory(int32_t fd, uint32_t path_ptr, uint32_t path_len) {
+    return __wasi_path_create_directory(fd, path_ptr, path_len);
+}
+
+__wasi_errno_t path_unlink_file(int32_t fd, uint32_t path_ptr, uint32_t path_len) {
+    return __wasi_path_unlink_file(fd, path_ptr, path_len);
+}
+
+__wasi_errno_t path_remove_directory(int32_t fd, uint32_t path_ptr, uint32_t path_len) {
+    return __wasi_path_remove_directory(fd, path_ptr, path_len);
+}
+
+__wasi_errno_t path_rename(
+    int32_t fd, uint32_t old_path_ptr, uint32_t old_path_len,
+    int32_t new_fd, uint32_t new_path_ptr, uint32_t new_path_len
+) {
+    return __wasi_path_rename(fd, old_path_ptr, old_path_len, new_fd, new_path_ptr, new_path_len);
+}
+
+__wasi_errno_t path_filestat_get(
+    int32_t fd,
+    uint32_t flags,
+    uint32_t path_ptr,
+    uint32_t path_len,
+    uint32_t filestat_ptr
+) {
+    return __wasi_path_filestat_get(fd, flags, path_ptr, path_len, filestat_ptr);
+}
+
+__wasi_errno_t clock_res_get(uint32_t clock_id, uint32_t resolution_ptr) {
+    return __wasi_clock_res_get(clock_id, resolution_ptr);
+}
+
+__wasi_errno_t clock_time_get(uint32_t clock_id, uint64_t precision, uint32_t time_ptr) {
+    return __wasi_clock_time_get(clock_id, precision, time_ptr);
+}
+
+__wasi_errno_t random_get(uint32_t buf_ptr, uint32_t buf_len) {
+    return __wasi_random_get(buf_ptr, buf_len);
+}
+
+/* sched_yield conflicts with system header - skip alias */
+
+__wasi_errno_t poll_oneoff(uint32_t in_ptr, uint32_t out_ptr, uint32_t nsubscriptions, uint32_t nevents_ptr) {
+    return __wasi_poll_oneoff(in_ptr, out_ptr, nsubscriptions, nevents_ptr);
+}

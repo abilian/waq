@@ -167,8 +167,12 @@ class ModuleContext:
         # Check if exported
         for exp in self.module.exports:
             if exp.kind == ExportKind.FUNC and exp.index == func_idx:
-                # Exported functions keep their name
-                name = exp.name
+                # Prefix exported functions with wasm_ to avoid conflicts with C symbols
+                # Exception: _start is a special WASI entry point
+                if exp.name == "_start":
+                    name = "_start"
+                else:
+                    name = f"wasm_{exp.name}"
                 self.func_names[func_idx] = name
                 return name
 

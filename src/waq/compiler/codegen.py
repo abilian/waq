@@ -565,15 +565,15 @@ def _compile_instruction(
         )
 
         # Then block - jumps to merge
-        then_block = qbe_func.add_block(then_label[1:])  # Remove @ prefix
+        then_block = qbe_func.add_block(then_label)
         then_block.terminator = Jump(target=Label(merge_label))
 
         # Else block - jumps to merge
-        else_block = qbe_func.add_block(else_label[1:])  # Remove @ prefix
+        else_block = qbe_func.add_block(else_label)
         else_block.terminator = Jump(target=Label(merge_label))
 
         # Merge block with phi
-        merge_block = qbe_func.add_block(merge_label[1:])  # Remove @ prefix
+        merge_block = qbe_func.add_block(merge_label)
         merge_block.phis.append(
             Phi(
                 result=Temporary(result.name),
@@ -608,13 +608,13 @@ def _compile_instruction(
             if_false=Label(else_label),
         )
 
-        then_block = qbe_func.add_block(then_label[1:])
+        then_block = qbe_func.add_block(then_label)
         then_block.terminator = Jump(target=Label(merge_label))
 
-        else_block = qbe_func.add_block(else_label[1:])
+        else_block = qbe_func.add_block(else_label)
         else_block.terminator = Jump(target=Label(merge_label))
 
-        merge_block = qbe_func.add_block(merge_label[1:])
+        merge_block = qbe_func.add_block(merge_label)
         merge_block.phis.append(
             Phi(
                 result=Temporary(result.name),
