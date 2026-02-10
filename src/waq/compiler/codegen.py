@@ -507,11 +507,11 @@ def _compile_instruction(
         if exc_result is not False:
             return exc_result
 
-    # Try control flow instructions (includes tail calls 0x12-0x14)
+    # Try control flow instructions (includes tail calls 0x12-0x15)
     result = compile_control_instruction(
         opcode, func_ctx, mod_ctx, qbe_func, block, read_operand
     )
-    if result is not None or opcode in range(0x15):
+    if result is not None or opcode in range(0x16):
         return result
 
     # Try variable instructions

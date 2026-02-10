@@ -274,7 +274,7 @@ class TestReturnCallRef:
             0x00,
             0x20, 0x00,  # local.get 0 (arg)
             0xD2, 0x00,  # ref.func 0
-            0x14, 0x00,  # return_call_ref type 0
+            0x15, 0x00,  # return_call_ref type 0 (opcode 0x15)
             0x0B,
         ])
 

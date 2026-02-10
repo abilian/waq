@@ -19,6 +19,13 @@ from pathlib import Path
 import pytest
 
 
+def pytest_configure(config):
+    """Register custom markers."""
+    config.addinivalue_line("markers", "unit: mark test as a unit test")
+    config.addinivalue_line("markers", "integration: mark test as an integration test")
+    config.addinivalue_line("markers", "e2e: mark test as an end-to-end test")
+
+
 def pytest_collection_modifyitems(config, items):
     """Automatically apply markers based on test directory."""
     for item in items:

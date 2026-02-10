@@ -75,7 +75,7 @@ def compile_gc_instruction(
             )
             block.instructions.append(
                 Store(
-                    store_type=L,
+                    store_type="l",
                     address=Temporary(offset.name),
                     value=Temporary(field_val.name),
                 )
@@ -168,7 +168,7 @@ def compile_gc_instruction(
         )
         block.instructions.append(
             Store(
-                store_type=L,
+                store_type="l",
                 address=Temporary(offset.name),
                 value=Temporary(value.name),
             )
@@ -247,7 +247,7 @@ def compile_gc_instruction(
             )
             block.instructions.append(
                 Store(
-                    store_type=L,
+                    store_type="l",
                     address=Temporary(offset.name),
                     value=Temporary(val.name),
                 )
@@ -325,7 +325,7 @@ def compile_gc_instruction(
 
         block.instructions.append(
             Store(
-                store_type=L,
+                store_type="l",
                 address=Temporary(final_addr.name),
                 value=Temporary(value.name),
             )

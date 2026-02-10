@@ -24,7 +24,7 @@ from qbepy.ir import (
 )
 
 from waq.compiler.context import ControlFrame, ModuleContext
-from waq.parser.types import BlockType, ValueType
+from waq.parser.types import BlockType, FuncType, ValueType
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -33,6 +33,20 @@ if TYPE_CHECKING:
     from qbepy.ir import Block
 
     from waq.compiler.context import FunctionContext
+    from waq.parser.module import WasmModule
+
+
+def _get_func_type(module: WasmModule, type_idx: int) -> FuncType:
+    """Get a function type from the module's type section.
+
+    Raises TypeError if the type is not a FuncType.
+    """
+    composite_type = module.types[type_idx]
+    if not isinstance(composite_type, FuncType):
+        raise TypeError(
+            f"Expected FuncType at index {type_idx}, got {type(composite_type).__name__}"
+        )
+    return composite_type
 
 
 def compile_control_instruction(
@@ -196,11 +210,18 @@ def compile_control_instruction(
             # Emit phi nodes for each result
             # then_label is already without @ prefix
             then_label_for_phi = frame.then_label
+            then_values = frame.then_values
+            assert then_label_for_phi is not None, (
+                "then_label must be set for if/else with results"
+            )
+            assert then_values is not None, (
+                "then_values must be set for if/else with results"
+            )
             for i, vtype in enumerate(frame.result_types):
                 phi_result = ctx.stack.new_temp(vtype)
                 qbe_type = _vtype_to_ir_type(vtype)
                 incoming = [
-                    (Label(then_label_for_phi), Temporary(frame.then_values[i])),
+                    (Label(then_label_for_phi), Temporary(then_values[i])),
                     (Label(else_label_for_phi), Temporary(else_values[i])),
                 ]
                 end_block.phis.append(
@@ -326,8 +347,13 @@ def compile_control_instruction(
         _table_idx = read_operand("u32")  # Table index (usually 0)
         return _emit_return_call_indirect(ctx, func, block, type_idx)
 
-    # return_call_ref (0x14) - tail call via typed function reference
+    # call_ref (0x14) - call via typed function reference
     if opcode == 0x14:
+        type_idx = read_operand("u32")
+        return _emit_call_ref(ctx, mod_ctx, func, block, type_idx)
+
+    # return_call_ref (0x15) - tail call via typed function reference
+    if opcode == 0x15:
         type_idx = read_operand("u32")
         return _emit_return_call_ref(ctx, func, block, type_idx)
 
@@ -343,7 +369,7 @@ def _block_type_to_results(
     if isinstance(block_type, ValueType):
         return (block_type,)
     # Type index - look up function type
-    func_type = ctx.module.types[block_type]
+    func_type = _get_func_type(ctx.module, block_type)
     return func_type.results
 
 
@@ -494,6 +520,87 @@ def _emit_call(
             )
 
 
+def _emit_call_ref(
+    ctx: FunctionContext,
+    mod_ctx: ModuleContext,
+    func: Function,
+    block: Block,
+    type_idx: int,
+) -> None:
+    """Emit a call via typed function reference.
+
+    The function reference is on the stack, followed by arguments.
+    """
+    from qbepy.ir import Alloc  # noqa: PLC0415
+
+    func_type = _get_func_type(ctx.module, type_idx)
+
+    # Pop function reference from stack
+    func_ref = ctx.stack.pop()
+
+    # Pop arguments (in reverse order)
+    args = ctx.stack.pop_n(len(func_type.params))
+
+    # Build argument list
+    call_args = []
+    for arg, ptype in zip(args, func_type.params, strict=True):
+        qbe_type = _vtype_to_ir_type(ptype)
+        call_args.append((qbe_type, Temporary(arg.name)))
+
+    # Emit call via function reference
+    if not func_type.results:
+        block.instructions.append(Call(target=Temporary(func_ref.name), args=call_args))
+    elif len(func_type.results) == 1:
+        result = ctx.stack.new_temp(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ref.name),
+                args=call_args,
+                result=Temporary(result.name),
+                result_type=qbe_type,
+            )
+        )
+    else:
+        # Multi-value return: allocate stack space for additional results
+        ret_slots = []
+        for i in range(1, len(func_type.results)):
+            vtype = func_type.results[i]
+            slot_name = ctx.stack.new_temp_no_push(ValueType.I64).name
+            size = _vtype_size(vtype)
+            align = 8 if size == 8 else 4
+            block.instructions.append(
+                Alloc(result=Temporary(slot_name), size=IntConst(size), align=align)
+            )
+            call_args.append((L, Temporary(slot_name)))
+            ret_slots.append((slot_name, vtype))
+
+        # Emit call with first result
+        first_result = ctx.stack.new_temp(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ref.name),
+                args=call_args,
+                result=Temporary(first_result.name),
+                result_type=qbe_type,
+            )
+        )
+
+        # Load additional results from stack slots
+        for slot_name, vtype in ret_slots:
+            result = ctx.stack.new_temp(vtype)
+            load_type = _vtype_to_load_type(vtype)
+            block.instructions.append(
+                Load(
+                    result=Temporary(result.name),
+                    result_type=_vtype_to_ir_type(vtype),
+                    address=Temporary(slot_name),
+                    load_type=load_type,
+                )
+            )
+
+
 def _vtype_size(vtype: ValueType) -> int:
     """Get the size in bytes of a WASM value type."""
     if vtype == ValueType.I32:
@@ -528,7 +635,7 @@ def _emit_call_indirect(ctx: FunctionContext, block: Block, type_idx: int) -> No
     """Emit an indirect function call through a table."""
 
     # Get function type from type index
-    func_type = ctx.module.types[type_idx]
+    func_type = _get_func_type(ctx.module, type_idx)
 
     # Pop table index (i32) from stack
     table_idx = ctx.stack.pop()
@@ -783,7 +890,7 @@ def _emit_return_call_indirect(
     """
     from qbepy.ir import Conversion  # noqa: PLC0415
 
-    func_type = ctx.module.types[type_idx]
+    func_type = _get_func_type(ctx.module, type_idx)
 
     # Pop table index
     table_idx = ctx.stack.pop()
@@ -927,7 +1034,7 @@ def _emit_return_call_ref(
 
     The function reference is on the stack.
     """
-    func_type = ctx.module.types[type_idx]
+    func_type = _get_func_type(ctx.module, type_idx)
 
     # Pop function reference from stack
     func_ref = ctx.stack.pop()

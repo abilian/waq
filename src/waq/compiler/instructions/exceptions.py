@@ -98,6 +98,7 @@ def compile_exception_instruction(
             block.instructions.append(
                 Call(target=Global("__wasm_pop_exception_handler"), args=[])
             )
+            assert frame.end_label is not None, "end_label must be set for try/catch"
             block.terminator = Jump(target=Label(frame.end_label))
 
         # Create catch block
@@ -106,6 +107,7 @@ def compile_exception_instruction(
             # Multiple catches - need new label
             catch_label = ctx.new_label("catch")
 
+        assert catch_label is not None, "catch_label must be set"
         catch_block = func.add_block(catch_label[1:])
 
         # Update frame to catch mode
@@ -174,6 +176,7 @@ def compile_exception_instruction(
         frame = ctx.pop_control()
 
         # End try body
+        assert frame.end_label is not None, "end_label must be set for try"
         if block.terminator is None:
             block.instructions.append(
                 Call(target=Global("__wasm_pop_exception_handler"), args=[])
@@ -196,6 +199,7 @@ def compile_exception_instruction(
         frame = ctx.control_stack[-1]
 
         # End the previous block
+        assert frame.end_label is not None, "end_label must be set for try/catch"
         if block.terminator is None:
             block.instructions.append(
                 Call(target=Global("__wasm_pop_exception_handler"), args=[])
