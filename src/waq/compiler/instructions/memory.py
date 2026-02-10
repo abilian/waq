@@ -44,6 +44,49 @@ def _vtype_to_ir_type(vtype: ValueType):
     raise ValueError(f"unknown value type: {vtype}")
 
 
+def _is_memory64(ctx: FunctionContext, memory_idx: int = 0) -> bool:
+    """Check if memory at given index is Memory64."""
+    if memory_idx < len(ctx.module.memories):
+        return ctx.module.memories[memory_idx].is_memory64
+    return False
+
+
+def _get_memory_base(
+    ctx: FunctionContext,
+    block: Block,
+    memory_idx: int = 0,
+) -> str:
+    """Get the memory base pointer for the given memory index.
+
+    Returns the name of a temporary holding the base pointer.
+    For single memory (idx=0), uses __wasm_memory global.
+    For multiple memories (idx>0), calls __wasm_memory_base(idx).
+    """
+    base_temp = ctx.stack.new_temp_no_push(ValueType.I64)
+
+    if memory_idx == 0 and len(ctx.module.memories) <= 1:
+        # Optimization: single memory case, use direct global
+        block.instructions.append(
+            Load(
+                result=Temporary(base_temp.name),
+                result_type=L,
+                address=Global("__wasm_memory"),
+            )
+        )
+    else:
+        # Multiple memories: call runtime to get base pointer
+        block.instructions.append(
+            Call(
+                target=Global("__wasm_memory_base"),
+                args=[(W, IntConst(memory_idx))],
+                result=Temporary(base_temp.name),
+                result_type=L,
+            )
+        )
+
+    return base_temp.name
+
+
 def compile_memory_instruction(
     opcode: int,
     ctx: FunctionContext,
@@ -65,31 +108,61 @@ def compile_memory_instruction(
 
     # memory.size (0x3F)
     if opcode == 0x3F:
-        _memory_idx = read_operand("u32")  # Always 0 in WASM 1.0
-        result = ctx.stack.new_temp(ValueType.I32)
-        block.instructions.append(
-            Call(
-                target=Global("__wasm_memory_size_pages"),
-                args=[],
-                result=Temporary(result.name),
-                result_type=W,
+        memory_idx = read_operand("u32")
+        is_mem64 = _is_memory64(ctx, memory_idx)
+
+        if is_mem64:
+            # Memory64: returns i64
+            result = ctx.stack.new_temp(ValueType.I64)
+            block.instructions.append(
+                Call(
+                    target=Global("__wasm_memory_size_pages64"),
+                    args=[(W, IntConst(memory_idx))],
+                    result=Temporary(result.name),
+                    result_type=L,
+                )
             )
-        )
+        else:
+            # Memory32: returns i32
+            result = ctx.stack.new_temp(ValueType.I32)
+            block.instructions.append(
+                Call(
+                    target=Global("__wasm_memory_size_pages"),
+                    args=[(W, IntConst(memory_idx))],
+                    result=Temporary(result.name),
+                    result_type=W,
+                )
+            )
         return True
 
     # memory.grow (0x40)
     if opcode == 0x40:
-        _memory_idx = read_operand("u32")  # Always 0 in WASM 1.0
+        memory_idx = read_operand("u32")
+        is_mem64 = _is_memory64(ctx, memory_idx)
         pages = ctx.stack.pop()
-        result = ctx.stack.new_temp(ValueType.I32)
-        block.instructions.append(
-            Call(
-                target=Global("__wasm_memory_grow"),
-                args=[(W, Temporary(pages.name))],
-                result=Temporary(result.name),
-                result_type=W,
+
+        if is_mem64:
+            # Memory64: takes/returns i64
+            result = ctx.stack.new_temp(ValueType.I64)
+            block.instructions.append(
+                Call(
+                    target=Global("__wasm_memory_grow64"),
+                    args=[(W, IntConst(memory_idx)), (L, Temporary(pages.name))],
+                    result=Temporary(result.name),
+                    result_type=L,
+                )
             )
-        )
+        else:
+            # Memory32: takes/returns i32
+            result = ctx.stack.new_temp(ValueType.I32)
+            block.instructions.append(
+                Call(
+                    target=Global("__wasm_memory_grow"),
+                    args=[(W, IntConst(memory_idx)), (W, Temporary(pages.name))],
+                    result=Temporary(result.name),
+                    result_type=W,
+                )
+            )
         return True
 
     return False
@@ -100,6 +173,7 @@ def _compile_load(
     ctx: FunctionContext,
     block: Block,
     read_operand: Callable[[str], Any],
+    memory_idx: int = 0,
 ) -> bool:
     """Compile a load instruction."""
     # Read memarg: align (unused), offset
@@ -109,27 +183,27 @@ def _compile_load(
     # Pop address from stack
     addr = ctx.stack.pop()
 
-    # Calculate effective address: base + addr + offset
-    # First, get memory base pointer
-    base_temp = ctx.stack.new_temp_no_push(ValueType.I64)
-    block.instructions.append(
-        Load(
-            result=Temporary(base_temp.name),
-            result_type=L,
-            address=Global("__wasm_memory"),
-        )
-    )
+    # Check if this is memory64
+    is_mem64 = _is_memory64(ctx, memory_idx)
 
-    # Extend address to 64-bit (it's i32)
-    addr64_temp = ctx.stack.new_temp_no_push(ValueType.I64)
-    block.instructions.append(
-        Conversion(
-            op="extuw",  # Extend unsigned word to long
-            result=Temporary(addr64_temp.name),
-            result_type=L,
-            operand=Temporary(addr.name),
+    # Calculate effective address: base + addr + offset
+    # Get memory base pointer (handles multiple memories)
+    base_temp_name = _get_memory_base(ctx, block, memory_idx)
+
+    if is_mem64:
+        # Memory64: address is already i64
+        addr64_temp = addr
+    else:
+        # Memory32: extend address to 64-bit (it's i32)
+        addr64_temp = ctx.stack.new_temp_no_push(ValueType.I64)
+        block.instructions.append(
+            Conversion(
+                op="extuw",  # Extend unsigned word to long
+                result=Temporary(addr64_temp.name),
+                result_type=L,
+                operand=Temporary(addr.name),
+            )
         )
-    )
 
     # Add base + addr
     eff_addr = ctx.stack.new_temp_no_push(ValueType.I64)
@@ -138,7 +212,7 @@ def _compile_load(
             result=Temporary(eff_addr.name),
             result_type=L,
             op="add",
-            left=Temporary(base_temp.name),
+            left=Temporary(base_temp_name),
             right=Temporary(addr64_temp.name),
         )
     )
@@ -182,6 +256,7 @@ def _compile_store(
     ctx: FunctionContext,
     block: Block,
     read_operand: Callable[[str], Any],
+    memory_idx: int = 0,
 ) -> bool:
     """Compile a store instruction."""
     # Read memarg: align (unused), offset
@@ -192,25 +267,27 @@ def _compile_store(
     value = ctx.stack.pop()
     addr = ctx.stack.pop()
 
-    # Calculate effective address (same as load)
-    base_temp = ctx.stack.new_temp_no_push(ValueType.I64)
-    block.instructions.append(
-        Load(
-            result=Temporary(base_temp.name),
-            result_type=L,
-            address=Global("__wasm_memory"),
-        )
-    )
+    # Check if this is memory64
+    is_mem64 = _is_memory64(ctx, memory_idx)
 
-    addr64_temp = ctx.stack.new_temp_no_push(ValueType.I64)
-    block.instructions.append(
-        Conversion(
-            op="extuw",
-            result=Temporary(addr64_temp.name),
-            result_type=L,
-            operand=Temporary(addr.name),
+    # Calculate effective address (same as load)
+    # Get memory base pointer (handles multiple memories)
+    base_temp_name = _get_memory_base(ctx, block, memory_idx)
+
+    if is_mem64:
+        # Memory64: address is already i64
+        addr64_temp = addr
+    else:
+        # Memory32: extend address to 64-bit
+        addr64_temp = ctx.stack.new_temp_no_push(ValueType.I64)
+        block.instructions.append(
+            Conversion(
+                op="extuw",
+                result=Temporary(addr64_temp.name),
+                result_type=L,
+                operand=Temporary(addr.name),
+            )
         )
-    )
 
     eff_addr = ctx.stack.new_temp_no_push(ValueType.I64)
     block.instructions.append(
@@ -218,7 +295,7 @@ def _compile_store(
             result=Temporary(eff_addr.name),
             result_type=L,
             op="add",
-            left=Temporary(base_temp.name),
+            left=Temporary(base_temp_name),
             right=Temporary(addr64_temp.name),
         )
     )

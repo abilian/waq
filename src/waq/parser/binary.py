@@ -161,17 +161,58 @@ class BinaryReader:
         # Type index (signed LEB128 for negative values)
         return self.read_s32_leb128()
 
-    def read_limits(self) -> Limits:
-        """Read memory/table limits."""
+    def read_limits(self, is_memory64: bool = False) -> Limits:
+        """Read memory/table limits.
+
+        Args:
+            is_memory64: If True, read 64-bit LEB128 for limits.
+        """
         flags = self.read_byte()
-        min_val = self.read_u32_leb128()
-        max_val = self.read_u32_leb128() if flags & 0x01 else None
+        has_max = bool(flags & 0x01)
+        if is_memory64:
+            min_val = self.read_u64_leb128()
+            max_val = self.read_u64_leb128() if has_max else None
+        else:
+            min_val = self.read_u32_leb128()
+            max_val = self.read_u32_leb128() if has_max else None
         return Limits(min_val, max_val)
 
     def read_memory_type(self) -> MemoryType:
-        """Read a memory type."""
-        limits = self.read_limits()
-        return MemoryType(limits)
+        """Read a memory type.
+
+        Supports both Memory32 (WASM 1.0) and Memory64 (WASM 3.0).
+        Memory64 uses flag bit 0x04 to indicate 64-bit addressing.
+        """
+        # Peek at flags to check for memory64
+        flags = self.peek_byte()
+        is_memory64 = bool(flags & 0x04)
+
+        # Clear the memory64 bit for limits parsing
+        # (read_limits expects just the has_max bit)
+        if is_memory64:
+            self.read_byte()  # Consume the flags byte
+            has_max = bool(flags & 0x01)
+            min_val = self.read_u64_leb128()
+            max_val = self.read_u64_leb128() if has_max else None
+            limits = Limits(min_val, max_val)
+        else:
+            limits = self.read_limits()
+
+        return MemoryType(limits, is_memory64=is_memory64)
+
+    def read_u64_leb128(self) -> int:
+        """Read an unsigned 64-bit LEB128 integer."""
+        result = 0
+        shift = 0
+        while True:
+            byte = self.read_byte()
+            result |= (byte & 0x7F) << shift
+            if (byte & 0x80) == 0:
+                break
+            shift += 7
+            if shift >= 70:
+                raise ParseError("LEB128 integer too large", self.pos)
+        return result
 
     def read_table_type(self) -> TableType:
         """Read a table type."""

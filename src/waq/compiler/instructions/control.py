@@ -315,6 +315,22 @@ def compile_control_instruction(
         _emit_call_indirect(ctx, block, type_idx)
         return None
 
+    # return_call (0x12) - tail call to direct function
+    if opcode == 0x12:
+        func_idx = read_operand("u32")
+        return _emit_return_call(ctx, mod_ctx, func, block, func_idx)
+
+    # return_call_indirect (0x13) - tail call through table
+    if opcode == 0x13:
+        type_idx = read_operand("u32")
+        _table_idx = read_operand("u32")  # Table index (usually 0)
+        return _emit_return_call_indirect(ctx, func, block, type_idx)
+
+    # return_call_ref (0x14) - tail call via typed function reference
+    if opcode == 0x14:
+        type_idx = read_operand("u32")
+        return _emit_return_call_ref(ctx, func, block, type_idx)
+
     return None
 
 
@@ -473,6 +489,7 @@ def _emit_call(
                     result=Temporary(result.name),
                     result_type=_vtype_to_ir_type(vtype),
                     address=Temporary(slot_name),
+                    load_type=load_type,
                 )
             )
 
@@ -634,3 +651,358 @@ def _emit_call_indirect(ctx: FunctionContext, block: Block, type_idx: int) -> No
                     address=Temporary(slot_name),
                 )
             )
+
+
+def _emit_return_call(
+    ctx: FunctionContext,
+    mod_ctx: ModuleContext,
+    func: Function,
+    block: Block,
+    target_func_idx: int,
+) -> Block | None:
+    """Emit a tail call to a direct function.
+
+    For self-recursion, this optimizes to a loop (update params, jump to entry).
+    For other functions, falls back to call + return.
+    """
+    target_func_type = ctx.module.get_func_type(target_func_idx)
+
+    # Pop arguments (in reverse order)
+    args = ctx.stack.pop_n(len(target_func_type.params))
+
+    # Check for self-recursion
+    if target_func_idx == ctx.func_idx:
+        # Self-tail-call optimization: update parameters and jump to entry
+        # Store new argument values to local parameter stack slots
+        for i, (arg, ptype) in enumerate(
+            zip(args, target_func_type.params, strict=True)
+        ):
+            addr_name = ctx.get_local_addr(i)
+            store_type = _vtype_to_store_type(ptype)
+            block.instructions.append(
+                Store(
+                    store_type=store_type,
+                    value=Temporary(arg.name),
+                    address=Temporary(addr_name),
+                )
+            )
+
+        # Jump back to entry block
+        block.terminator = Jump(target=Label("entry"))
+        return None
+
+    # Non-self tail call: emit regular call + return
+    # Build argument list for Call instruction
+    call_args = []
+    for arg, ptype in zip(args, target_func_type.params, strict=True):
+        qbe_type = _vtype_to_ir_type(ptype)
+        call_args.append((qbe_type, Temporary(arg.name)))
+
+    func_name = mod_ctx.get_func_name(target_func_idx)
+
+    # Emit call and return result
+    if not target_func_type.results:
+        block.instructions.append(Call(target=Global(func_name), args=call_args))
+        block.terminator = Return(value=None)
+    elif len(target_func_type.results) == 1:
+        result = ctx.stack.new_temp_no_push(target_func_type.results[0])
+        qbe_type = _vtype_to_ir_type(target_func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Global(func_name),
+                args=call_args,
+                result=Temporary(result.name),
+                result_type=qbe_type,
+            )
+        )
+        block.terminator = Return(value=Temporary(result.name))
+    else:
+        # Multi-value return: allocate stack slots, call, then return first value
+        # and store rest to out-params
+        from qbepy.ir import Alloc  # noqa: PLC0415
+
+        ret_slots = []
+        for i in range(1, len(target_func_type.results)):
+            vtype = target_func_type.results[i]
+            slot_name = ctx.stack.new_temp_no_push(ValueType.I64).name
+            size = _vtype_size(vtype)
+            align = 8 if size == 8 else 4
+            block.instructions.append(
+                Alloc(result=Temporary(slot_name), size=IntConst(size), align=align)
+            )
+            call_args.append((L, Temporary(slot_name)))
+            ret_slots.append((slot_name, vtype))
+
+        # Call and get first result
+        first_result = ctx.stack.new_temp_no_push(target_func_type.results[0])
+        qbe_type = _vtype_to_ir_type(target_func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Global(func_name),
+                args=call_args,
+                result=Temporary(first_result.name),
+                result_type=qbe_type,
+            )
+        )
+
+        # Store additional results to our out-params
+        for i, (slot_name, vtype) in enumerate(ret_slots):
+            loaded_val = ctx.stack.new_temp_no_push(vtype)
+            block.instructions.append(
+                Load(
+                    result=Temporary(loaded_val.name),
+                    result_type=_vtype_to_ir_type(vtype),
+                    address=Temporary(slot_name),
+                )
+            )
+            out_param = ctx.mv_out_params[i]
+            store_type = _vtype_to_store_type(vtype)
+            block.instructions.append(
+                Store(
+                    store_type=store_type,
+                    value=Temporary(loaded_val.name),
+                    address=Temporary(out_param),
+                )
+            )
+
+        block.terminator = Return(value=Temporary(first_result.name))
+
+    return None
+
+
+def _emit_return_call_indirect(
+    ctx: FunctionContext,
+    func: Function,
+    block: Block,
+    type_idx: int,
+) -> Block | None:
+    """Emit a tail call through a table.
+
+    Since we can't know the target at compile time, this falls back
+    to an indirect call + return.
+    """
+    from qbepy.ir import Conversion  # noqa: PLC0415
+
+    func_type = ctx.module.types[type_idx]
+
+    # Pop table index
+    table_idx = ctx.stack.pop()
+
+    # Pop arguments (in reverse order)
+    args = ctx.stack.pop_n(len(func_type.params))
+
+    # Build argument list
+    call_args = []
+    for arg, ptype in zip(args, func_type.params, strict=True):
+        qbe_type = _vtype_to_ir_type(ptype)
+        call_args.append((qbe_type, Temporary(arg.name)))
+
+    # Load table base pointer
+    table_base = ctx.stack.new_temp_no_push(ValueType.I64)
+    block.instructions.append(
+        Load(
+            result=Temporary(table_base.name),
+            result_type=L,
+            address=Global("__wasm_table"),
+        )
+    )
+
+    # Calculate offset: table_idx * 8
+    idx64 = ctx.stack.new_temp_no_push(ValueType.I64)
+    block.instructions.append(
+        Conversion(
+            op="extuw",
+            result=Temporary(idx64.name),
+            result_type=L,
+            operand=Temporary(table_idx.name),
+        )
+    )
+
+    offset = ctx.stack.new_temp_no_push(ValueType.I64)
+    block.instructions.append(
+        BinaryOp(
+            result=Temporary(offset.name),
+            result_type=L,
+            op="mul",
+            left=Temporary(idx64.name),
+            right=IntConst(8),
+        )
+    )
+
+    addr = ctx.stack.new_temp_no_push(ValueType.I64)
+    block.instructions.append(
+        BinaryOp(
+            result=Temporary(addr.name),
+            result_type=L,
+            op="add",
+            left=Temporary(table_base.name),
+            right=Temporary(offset.name),
+        )
+    )
+
+    # Load function pointer
+    func_ptr = ctx.stack.new_temp_no_push(ValueType.I64)
+    block.instructions.append(
+        Load(
+            result=Temporary(func_ptr.name),
+            result_type=L,
+            address=Temporary(addr.name),
+        )
+    )
+
+    # Emit indirect call and return result
+    if not func_type.results:
+        block.instructions.append(Call(target=Temporary(func_ptr.name), args=call_args))
+        block.terminator = Return(value=None)
+    elif len(func_type.results) == 1:
+        result = ctx.stack.new_temp_no_push(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ptr.name),
+                args=call_args,
+                result=Temporary(result.name),
+                result_type=qbe_type,
+            )
+        )
+        block.terminator = Return(value=Temporary(result.name))
+    else:
+        # Multi-value return for indirect tail call
+        from qbepy.ir import Alloc  # noqa: PLC0415
+
+        ret_slots = []
+        for i in range(1, len(func_type.results)):
+            vtype = func_type.results[i]
+            slot_name = ctx.stack.new_temp_no_push(ValueType.I64).name
+            size = _vtype_size(vtype)
+            align = 8 if size == 8 else 4
+            block.instructions.append(
+                Alloc(result=Temporary(slot_name), size=IntConst(size), align=align)
+            )
+            call_args.append((L, Temporary(slot_name)))
+            ret_slots.append((slot_name, vtype))
+
+        first_result = ctx.stack.new_temp_no_push(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ptr.name),
+                args=call_args,
+                result=Temporary(first_result.name),
+                result_type=qbe_type,
+            )
+        )
+
+        for i, (slot_name, vtype) in enumerate(ret_slots):
+            loaded_val = ctx.stack.new_temp_no_push(vtype)
+            block.instructions.append(
+                Load(
+                    result=Temporary(loaded_val.name),
+                    result_type=_vtype_to_ir_type(vtype),
+                    address=Temporary(slot_name),
+                )
+            )
+            out_param = ctx.mv_out_params[i]
+            store_type = _vtype_to_store_type(vtype)
+            block.instructions.append(
+                Store(
+                    store_type=store_type,
+                    value=Temporary(loaded_val.name),
+                    address=Temporary(out_param),
+                )
+            )
+
+        block.terminator = Return(value=Temporary(first_result.name))
+
+    return None
+
+
+def _emit_return_call_ref(
+    ctx: FunctionContext,
+    func: Function,
+    block: Block,
+    type_idx: int,
+) -> Block | None:
+    """Emit a tail call via typed function reference.
+
+    The function reference is on the stack.
+    """
+    func_type = ctx.module.types[type_idx]
+
+    # Pop function reference from stack
+    func_ref = ctx.stack.pop()
+
+    # Pop arguments (in reverse order)
+    args = ctx.stack.pop_n(len(func_type.params))
+
+    # Build argument list
+    call_args = []
+    for arg, ptype in zip(args, func_type.params, strict=True):
+        qbe_type = _vtype_to_ir_type(ptype)
+        call_args.append((qbe_type, Temporary(arg.name)))
+
+    # Emit call via function reference and return result
+    if not func_type.results:
+        block.instructions.append(Call(target=Temporary(func_ref.name), args=call_args))
+        block.terminator = Return(value=None)
+    elif len(func_type.results) == 1:
+        result = ctx.stack.new_temp_no_push(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ref.name),
+                args=call_args,
+                result=Temporary(result.name),
+                result_type=qbe_type,
+            )
+        )
+        block.terminator = Return(value=Temporary(result.name))
+    else:
+        # Multi-value return for ref call
+        from qbepy.ir import Alloc  # noqa: PLC0415
+
+        ret_slots = []
+        for i in range(1, len(func_type.results)):
+            vtype = func_type.results[i]
+            slot_name = ctx.stack.new_temp_no_push(ValueType.I64).name
+            size = _vtype_size(vtype)
+            align = 8 if size == 8 else 4
+            block.instructions.append(
+                Alloc(result=Temporary(slot_name), size=IntConst(size), align=align)
+            )
+            call_args.append((L, Temporary(slot_name)))
+            ret_slots.append((slot_name, vtype))
+
+        first_result = ctx.stack.new_temp_no_push(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ref.name),
+                args=call_args,
+                result=Temporary(first_result.name),
+                result_type=qbe_type,
+            )
+        )
+
+        for i, (slot_name, vtype) in enumerate(ret_slots):
+            loaded_val = ctx.stack.new_temp_no_push(vtype)
+            block.instructions.append(
+                Load(
+                    result=Temporary(loaded_val.name),
+                    result_type=_vtype_to_ir_type(vtype),
+                    address=Temporary(slot_name),
+                )
+            )
+            out_param = ctx.mv_out_params[i]
+            store_type = _vtype_to_store_type(vtype)
+            block.instructions.append(
+                Store(
+                    store_type=store_type,
+                    value=Temporary(loaded_val.name),
+                    address=Temporary(out_param),
+                )
+            )
+
+        block.terminator = Return(value=Temporary(first_result.name))
+
+    return None
