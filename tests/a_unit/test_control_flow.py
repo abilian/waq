@@ -701,3 +701,249 @@ class TestSelect:
         output = qbe.emit()
         # select uses conditional branching (jnz)
         assert "jnz" in output or "phi" in output
+
+
+class TestNestedBlocks:
+    """Tests for nested control structures."""
+
+    def test_nested_blocks(self):
+        """Test nested block structures."""
+        # Body: 0 locals, block i32 { block i32 { 42 } }
+        func_body = bytes([
+            0x00,  # 0 locals
+            0x02,
+            0x7F,  # block (result i32)
+            0x02,
+            0x7F,  # nested block (result i32)
+            0x41,
+            0x2A,  # i32.const 42
+            0x0B,  # end inner block
+            0x0B,  # end outer block
+            0x0B,  # end function
+        ])
+        code_section = bytes([0x01, len(func_body)]) + func_body
+        wasm = (
+            bytes([
+                0x00,
+                0x61,
+                0x73,
+                0x6D,  # magic
+                0x01,
+                0x00,
+                0x00,
+                0x00,  # version
+                # Type section: () -> (i32)
+                0x01,
+                0x05,
+                0x01,
+                0x60,
+                0x00,
+                0x01,
+                0x7F,
+                # Function section
+                0x03,
+                0x02,
+                0x01,
+                0x00,
+                # Code section
+                0x0A,
+                len(code_section),
+            ])
+            + code_section
+        )
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "42" in output
+        # Should have multiple block_end labels
+        assert output.count("block_end") >= 2
+
+
+class TestLoopWithBranch:
+    """Tests for loops with branches."""
+
+    def test_loop_with_br(self):
+        """Test loop with conditional break."""
+        # Body: 0 locals, block { loop { get 0, br_if 1, br 0 } }
+        func_body = bytes([
+            0x00,  # 0 locals
+            0x02,
+            0x40,  # block (void) - for br target
+            0x03,
+            0x40,  # loop (void)
+            0x20,
+            0x00,  # local.get 0
+            0x0D,
+            0x01,  # br_if 1 (exit block)
+            0x0C,
+            0x00,  # br 0 (continue loop)
+            0x0B,  # end loop
+            0x0B,  # end block
+            0x0B,  # end function
+        ])
+        code_section = bytes([0x01, len(func_body)]) + func_body
+        wasm = (
+            bytes([
+                0x00,
+                0x61,
+                0x73,
+                0x6D,  # magic
+                0x01,
+                0x00,
+                0x00,
+                0x00,  # version
+                # Type section: (i32) -> ()
+                0x01,
+                0x05,
+                0x01,
+                0x60,
+                0x01,
+                0x7F,
+                0x00,
+                # Function section
+                0x03,
+                0x02,
+                0x01,
+                0x00,
+                # Code section
+                0x0A,
+                len(code_section),
+            ])
+            + code_section
+        )
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "loop" in output
+        assert "jnz" in output  # br_if
+        assert "jmp" in output  # br
+
+
+class TestCallWithMultipleArgs:
+    """Tests for calls with multiple arguments."""
+
+    def test_call_with_4_args(self):
+        """Test function call with 4 arguments."""
+        # First function: push 4 args, call
+        func1_body = bytes([
+            0x00,  # 0 locals
+            0x41,
+            0x01,  # const 1
+            0x41,
+            0x02,  # const 2
+            0x41,
+            0x03,  # const 3
+            0x41,
+            0x04,  # const 4
+            0x10,
+            0x01,  # call 1
+            0x0B,  # end
+        ])
+        # Second function: just return
+        func2_body = bytes([0x00, 0x0B])
+        code_section = (
+            bytes([0x02, len(func1_body)])
+            + func1_body
+            + bytes([len(func2_body)])
+            + func2_body
+        )
+        wasm = (
+            bytes([
+                0x00,
+                0x61,
+                0x73,
+                0x6D,  # magic
+                0x01,
+                0x00,
+                0x00,
+                0x00,  # version
+                # Type section: 2 types
+                # () -> (), (i32, i32, i32, i32) -> ()
+                0x01,
+                0x0B,
+                0x02,
+                0x60,
+                0x00,
+                0x00,  # () -> ()
+                0x60,
+                0x04,
+                0x7F,
+                0x7F,
+                0x7F,
+                0x7F,
+                0x00,  # (i32, i32, i32, i32) -> ()
+                # Function section: 2 functions
+                0x03,
+                0x03,
+                0x02,
+                0x00,
+                0x01,
+                # Code section
+                0x0A,
+                len(code_section),
+            ])
+            + code_section
+        )
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "call" in output
+
+
+class TestIfElseWithResults:
+    """Tests for if/else with results (phi nodes)."""
+
+    def test_if_else_with_i64_result(self):
+        """Test if/else with i64 result type."""
+        # Body: get 0, if i64 { 1 } else { 0 }
+        func_body = bytes([
+            0x00,  # 0 locals
+            0x20,
+            0x00,  # local.get 0
+            0x04,
+            0x7E,  # if (result i64)
+            0x42,
+            0x01,  # i64.const 1
+            0x05,  # else
+            0x42,
+            0x00,  # i64.const 0
+            0x0B,  # end if
+            0x0B,  # end
+        ])
+        code_section = bytes([0x01, len(func_body)]) + func_body
+        wasm = (
+            bytes([
+                0x00,
+                0x61,
+                0x73,
+                0x6D,  # magic
+                0x01,
+                0x00,
+                0x00,
+                0x00,  # version
+                # Type section: (i32) -> (i64)
+                0x01,
+                0x06,
+                0x01,
+                0x60,
+                0x01,
+                0x7F,
+                0x01,
+                0x7E,
+                # Function section
+                0x03,
+                0x02,
+                0x01,
+                0x00,
+                # Code section
+                0x0A,
+                len(code_section),
+            ])
+            + code_section
+        )
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "jnz" in output
+        assert "then" in output
+        assert "else" in output

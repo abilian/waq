@@ -273,3 +273,379 @@ class TestI31Instructions:
         output = qbe.emit()
         assert "__wasm_ref_i31" in output
         assert "__wasm_i31_get_s" in output
+
+
+def make_i31_get_u_wasm() -> bytes:
+    """Create WASM with i31.get_u instruction."""
+    type_section = bytes([
+        0x01,
+        # Type 0: (i32) -> (i32)
+        0x60,
+        0x01,
+        0x7F,
+        0x01,
+        0x7F,
+    ])
+
+    func_section = bytes([0x01, 0x00])
+
+    export_section = bytes([0x01, 0x09]) + b"i31_get_u" + bytes([0x00, 0x00])
+
+    # Code: ref.i31 then i31.get_u
+    func_body = bytes([
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0xFB,
+        0x1C,  # ref.i31
+        0xFB,
+        0x1E,  # i31.get_u
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_struct_new_default_wasm() -> bytes:
+    """Create WASM with struct.new_default instruction."""
+    type_section = bytes([
+        0x02,
+        # Type 0: struct with one i32 field
+        0x5F,
+        0x01,
+        0x7F,
+        0x01,
+        # Type 1: () -> (structref)
+        0x60,
+        0x00,
+        0x01,
+        0x6B,
+    ])
+
+    func_section = bytes([0x01, 0x01])
+
+    export_section = bytes([0x01, 0x12]) + b"struct_new_default" + bytes([0x00, 0x00])
+
+    # Code: struct.new_default 0
+    func_body = bytes([
+        0x00,
+        0xFB,
+        0x01,
+        0x00,  # struct.new_default 0
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_struct_set_wasm() -> bytes:
+    """Create WASM with struct.set instruction."""
+    type_section = bytes([
+        0x02,
+        # Type 0: struct with one i32 field
+        0x5F,
+        0x01,
+        0x7F,
+        0x01,
+        # Type 1: (structref, i32) -> ()
+        0x60,
+        0x02,
+        0x6B,
+        0x7F,
+        0x00,
+    ])
+
+    func_section = bytes([0x01, 0x01])
+
+    export_section = bytes([0x01, 0x0A]) + b"struct_set" + bytes([0x00, 0x00])
+
+    # Code: struct.set 0 0
+    func_body = bytes([
+        0x00,
+        0x20,
+        0x00,  # local.get 0 (structref)
+        0x20,
+        0x01,  # local.get 1 (value)
+        0xFB,
+        0x05,
+        0x00,
+        0x00,  # struct.set 0 0
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_array_new_default_wasm() -> bytes:
+    """Create WASM with array.new_default instruction."""
+    type_section = bytes([
+        0x02,
+        # Type 0: array of i32
+        0x5E,
+        0x7F,
+        0x01,
+        # Type 1: (i32) -> (arrayref)
+        0x60,
+        0x01,
+        0x7F,
+        0x01,
+        0x6A,
+    ])
+
+    func_section = bytes([0x01, 0x01])
+
+    export_section = bytes([0x01, 0x11]) + b"array_new_default" + bytes([0x00, 0x00])
+
+    # Code: array.new_default(length)
+    func_body = bytes([
+        0x00,
+        0x20,
+        0x00,  # local.get 0 (length)
+        0xFB,
+        0x07,
+        0x00,  # array.new_default 0
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_array_get_set_wasm() -> bytes:
+    """Create WASM with array.get and array.set instructions."""
+    type_section = bytes([
+        0x02,
+        # Type 0: array of i32
+        0x5E,
+        0x7F,
+        0x01,
+        # Type 1: (arrayref, i32, i32) -> (i32)
+        0x60,
+        0x03,
+        0x6A,
+        0x7F,
+        0x7F,
+        0x01,
+        0x7F,
+    ])
+
+    func_section = bytes([0x01, 0x01])
+
+    export_section = bytes([0x01, 0x0D]) + b"array_get_set" + bytes([0x00, 0x00])
+
+    # Code: set element, then get it
+    func_body = bytes([
+        0x00,
+        0x20,
+        0x00,  # local.get 0 (arrayref)
+        0x20,
+        0x01,  # local.get 1 (index)
+        0x20,
+        0x02,  # local.get 2 (value)
+        0xFB,
+        0x0E,
+        0x00,  # array.set 0
+        0x20,
+        0x00,  # local.get 0 (arrayref)
+        0x20,
+        0x01,  # local.get 1 (index)
+        0xFB,
+        0x0B,
+        0x00,  # array.get 0
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_ref_test_wasm() -> bytes:
+    """Create WASM with ref.test instruction."""
+    type_section = bytes([
+        0x02,
+        # Type 0: struct
+        0x5F,
+        0x01,
+        0x7F,
+        0x01,
+        # Type 1: (structref) -> (i32)
+        0x60,
+        0x01,
+        0x6B,
+        0x01,
+        0x7F,
+    ])
+
+    func_section = bytes([0x01, 0x01])
+
+    export_section = bytes([0x01, 0x08]) + b"ref_test" + bytes([0x00, 0x00])
+
+    # Code: ref.test type 0
+    func_body = bytes([
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0xFB,
+        0x14,
+        0x00,  # ref.test 0
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_ref_cast_wasm() -> bytes:
+    """Create WASM with ref.cast instruction."""
+    type_section = bytes([
+        0x02,
+        # Type 0: struct
+        0x5F,
+        0x01,
+        0x7F,
+        0x01,
+        # Type 1: (structref) -> (structref)
+        0x60,
+        0x01,
+        0x6B,
+        0x01,
+        0x6B,
+    ])
+
+    func_section = bytes([0x01, 0x01])
+
+    export_section = bytes([0x01, 0x08]) + b"ref_cast" + bytes([0x00, 0x00])
+
+    # Code: ref.cast type 0
+    func_body = bytes([
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0xFB,
+        0x16,
+        0x00,  # ref.cast 0
+        0x0B,
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+class TestMoreStructInstructions:
+    """Additional tests for struct instructions."""
+
+    def test_struct_new_default_compiles(self):
+        """Test that struct.new_default compiles."""
+        wasm = make_struct_new_default_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_struct_new_default" in output
+
+    def test_struct_set_compiles(self):
+        """Test that struct.set compiles."""
+        wasm = make_struct_set_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        # Should store to struct field
+        assert "store" in output.lower()
+
+
+class TestMoreArrayInstructions:
+    """Additional tests for array instructions."""
+
+    def test_array_new_default_compiles(self):
+        """Test that array.new_default compiles."""
+        wasm = make_array_new_default_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_array_new_default" in output
+
+    def test_array_get_set_compiles(self):
+        """Test that array.get and array.set compile."""
+        wasm = make_array_get_set_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        # Should have store and load operations
+        assert "store" in output.lower()
+        assert "load" in output.lower()
+
+
+class TestMoreI31Instructions:
+    """Additional tests for i31 instructions."""
+
+    def test_i31_get_u_compiles(self):
+        """Test that i31.get_u compiles."""
+        wasm = make_i31_get_u_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_i31_get_u" in output
+
+
+class TestRefInstructions:
+    """Tests for reference type testing and casting."""
+
+    def test_ref_test_compiles(self):
+        """Test that ref.test compiles."""
+        wasm = make_ref_test_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_ref_test" in output
+
+    def test_ref_cast_compiles(self):
+        """Test that ref.cast compiles."""
+        wasm = make_ref_cast_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_ref_cast" in output

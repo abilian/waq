@@ -132,6 +132,22 @@ class TestIntTruncFloat:
         output = qbe.emit()
         assert "dtosi" in output
 
+    def test_i64_trunc_f32_u(self):
+        """Test i64.trunc_f32_u instruction."""
+        wasm = make_conversion_wasm(0xAF, 0x7D, 0x7E)  # f32 -> i64
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "stoui" in output
+
+    def test_i64_trunc_f64_u(self):
+        """Test i64.trunc_f64_u instruction."""
+        wasm = make_conversion_wasm(0xB1, 0x7C, 0x7E)  # f64 -> i64
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "dtoui" in output
+
 
 class TestFloatConvertInt:
     """Tests for float conversion from ints."""
@@ -175,6 +191,30 @@ class TestFloatConvertInt:
         qbe = compile_module(module)
         output = qbe.emit()
         assert "sltof" in output
+
+    def test_f32_convert_i64_u(self):
+        """Test f32.convert_i64_u instruction."""
+        wasm = make_conversion_wasm(0xB5, 0x7E, 0x7D)  # i64 -> f32
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "ultof" in output
+
+    def test_f64_convert_i32_u(self):
+        """Test f64.convert_i32_u instruction."""
+        wasm = make_conversion_wasm(0xB8, 0x7F, 0x7C)  # i32 -> f64
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "uwtof" in output
+
+    def test_f64_convert_i64_u(self):
+        """Test f64.convert_i64_u instruction."""
+        wasm = make_conversion_wasm(0xBA, 0x7E, 0x7C)  # i64 -> f64
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "ultof" in output
 
 
 class TestFloatPromoteDemote:

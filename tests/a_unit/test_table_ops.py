@@ -263,3 +263,186 @@ class TestTableFill:
         qbe = compile_module(module)
         output = qbe.emit()
         assert "__wasm_table_fill" in output
+
+
+def make_table_init_wasm() -> bytes:
+    """Create WASM with table.init instruction.
+
+    (dest: i32, src: i32, len: i32) -> ()
+    """
+    # Type section: (i32, i32, i32) -> ()
+    type_section = bytes([0x01, 0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x00])
+
+    # Function section
+    func_section = bytes([0x01, 0x00])
+
+    # Table section: 1 funcref table, min 10
+    table_section = bytes([0x01, 0x70, 0x00, 0x0A])
+
+    # Element section: 1 active segment (flags=0)
+    element_section = bytes([
+        0x01,  # 1 segment
+        0x00,  # active segment (flags=0)
+        0x41,
+        0x00,
+        0x0B,  # offset: i32.const 0, end
+        0x00,  # 0 elements
+    ])
+
+    # Export section
+    export_section = bytes([0x01, 0x04]) + b"init" + bytes([0x00, 0x00])
+
+    # Code section: table.init
+    func_body = bytes([
+        0x00,  # 0 locals
+        0x20,
+        0x00,  # local.get 0 (dest)
+        0x20,
+        0x01,  # local.get 1 (src)
+        0x20,
+        0x02,  # local.get 2 (len)
+        0xFC,
+        0x0C,
+        0x00,
+        0x00,  # table.init elem_idx=0 table_idx=0
+        0x0B,  # end
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x04, len(table_section)]) + table_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x09, len(element_section)]) + element_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_elem_drop_wasm() -> bytes:
+    """Create WASM with elem.drop instruction.
+
+    () -> ()
+    """
+    # Type section: () -> ()
+    type_section = bytes([0x01, 0x60, 0x00, 0x00])
+
+    # Function section
+    func_section = bytes([0x01, 0x00])
+
+    # Table section: 1 funcref table, min 10
+    table_section = bytes([0x01, 0x70, 0x00, 0x0A])
+
+    # Element section: 1 active segment (flags=0)
+    element_section = bytes([
+        0x01,  # 1 segment
+        0x00,  # active segment (flags=0)
+        0x41,
+        0x00,
+        0x0B,  # offset: i32.const 0, end
+        0x00,  # 0 elements
+    ])
+
+    # Export section
+    export_section = bytes([0x01, 0x04]) + b"drop" + bytes([0x00, 0x00])
+
+    # Code section: elem.drop
+    func_body = bytes([
+        0x00,  # 0 locals
+        0xFC,
+        0x0D,
+        0x00,  # elem.drop elem_idx=0
+        0x0B,  # end
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x04, len(table_section)]) + table_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x09, len(element_section)]) + element_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+def make_table_copy_wasm() -> bytes:
+    """Create WASM with table.copy instruction.
+
+    (dest: i32, src: i32, len: i32) -> ()
+    """
+    # Type section: (i32, i32, i32) -> ()
+    type_section = bytes([0x01, 0x60, 0x03, 0x7F, 0x7F, 0x7F, 0x00])
+
+    # Function section
+    func_section = bytes([0x01, 0x00])
+
+    # Table section: 1 funcref table, min 10
+    table_section = bytes([0x01, 0x70, 0x00, 0x0A])
+
+    # Export section
+    export_section = bytes([0x01, 0x04]) + b"copy" + bytes([0x00, 0x00])
+
+    # Code section: table.copy
+    func_body = bytes([
+        0x00,  # 0 locals
+        0x20,
+        0x00,  # local.get 0 (dest)
+        0x20,
+        0x01,  # local.get 1 (src)
+        0x20,
+        0x02,  # local.get 2 (len)
+        0xFC,
+        0x0E,
+        0x00,
+        0x00,  # table.copy dest_table=0 src_table=0
+        0x0B,  # end
+    ])
+    code_section = bytes([0x01, len(func_body)]) + func_body
+
+    wasm = bytes([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00])
+    wasm += bytes([0x01, len(type_section)]) + type_section
+    wasm += bytes([0x03, len(func_section)]) + func_section
+    wasm += bytes([0x04, len(table_section)]) + table_section
+    wasm += bytes([0x07, len(export_section)]) + export_section
+    wasm += bytes([0x0A, len(code_section)]) + code_section
+
+    return wasm
+
+
+class TestTableInit:
+    """Tests for table.init instruction."""
+
+    def test_table_init_compiles(self):
+        """Test that table.init instruction compiles."""
+        wasm = make_table_init_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_table_init" in output
+
+
+class TestElemDrop:
+    """Tests for elem.drop instruction."""
+
+    def test_elem_drop_compiles(self):
+        """Test that elem.drop instruction compiles."""
+        wasm = make_elem_drop_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_elem_drop" in output
+
+
+class TestTableCopy:
+    """Tests for table.copy instruction."""
+
+    def test_table_copy_compiles(self):
+        """Test that table.copy instruction compiles."""
+        wasm = make_table_copy_wasm()
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_table_copy" in output

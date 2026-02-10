@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+
 from waq.compiler import compile_module
 from waq.parser.module import parse_module
 
@@ -719,3 +721,678 @@ class TestConstants:
         qbe = compile_module(module)
         output = qbe.emit()
         assert "-1" in output
+
+
+# F32 helper functions
+def make_f32_binary_wasm(opcode: int) -> bytes:
+    """Create WASM for: (f32, f32) -> f32 { a op b }"""
+    return bytes([
+        0x00,
+        0x61,
+        0x73,
+        0x6D,  # magic
+        0x01,
+        0x00,
+        0x00,
+        0x00,  # version
+        # Type section: (f32, f32) -> (f32)
+        0x01,
+        0x07,
+        0x01,
+        0x60,
+        0x02,
+        0x7D,
+        0x7D,
+        0x01,
+        0x7D,
+        # Function section
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+        # Code section
+        0x0A,
+        0x09,
+        0x01,
+        0x07,
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0x20,
+        0x01,  # local.get 1
+        opcode,  # binary operation
+        0x0B,  # end
+    ])
+
+
+def make_f32_unary_wasm(opcode: int) -> bytes:
+    """Create WASM for: (f32) -> f32 { op a }"""
+    return bytes([
+        0x00,
+        0x61,
+        0x73,
+        0x6D,  # magic
+        0x01,
+        0x00,
+        0x00,
+        0x00,  # version
+        # Type section: (f32) -> (f32)
+        0x01,
+        0x06,
+        0x01,
+        0x60,
+        0x01,
+        0x7D,
+        0x01,
+        0x7D,
+        # Function section
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+        # Code section
+        0x0A,
+        0x07,
+        0x01,
+        0x05,
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        opcode,  # unary operation
+        0x0B,  # end
+    ])
+
+
+def make_f32_cmp_wasm(opcode: int) -> bytes:
+    """Create WASM for: (f32, f32) -> i32 { a cmp b }"""
+    return bytes([
+        0x00,
+        0x61,
+        0x73,
+        0x6D,  # magic
+        0x01,
+        0x00,
+        0x00,
+        0x00,  # version
+        # Type section: (f32, f32) -> (i32)
+        0x01,
+        0x07,
+        0x01,
+        0x60,
+        0x02,
+        0x7D,
+        0x7D,
+        0x01,
+        0x7F,
+        # Function section
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+        # Code section
+        0x0A,
+        0x09,
+        0x01,
+        0x07,
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0x20,
+        0x01,  # local.get 1
+        opcode,  # comparison
+        0x0B,  # end
+    ])
+
+
+def make_f64_binary_wasm(opcode: int) -> bytes:
+    """Create WASM for: (f64, f64) -> f64 { a op b }"""
+    return bytes([
+        0x00,
+        0x61,
+        0x73,
+        0x6D,  # magic
+        0x01,
+        0x00,
+        0x00,
+        0x00,  # version
+        # Type section: (f64, f64) -> (f64)
+        0x01,
+        0x07,
+        0x01,
+        0x60,
+        0x02,
+        0x7C,
+        0x7C,
+        0x01,
+        0x7C,
+        # Function section
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+        # Code section
+        0x0A,
+        0x09,
+        0x01,
+        0x07,
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0x20,
+        0x01,  # local.get 1
+        opcode,  # binary operation
+        0x0B,  # end
+    ])
+
+
+def make_f64_unary_wasm(opcode: int) -> bytes:
+    """Create WASM for: (f64) -> f64 { op a }"""
+    return bytes([
+        0x00,
+        0x61,
+        0x73,
+        0x6D,  # magic
+        0x01,
+        0x00,
+        0x00,
+        0x00,  # version
+        # Type section: (f64) -> (f64)
+        0x01,
+        0x06,
+        0x01,
+        0x60,
+        0x01,
+        0x7C,
+        0x01,
+        0x7C,
+        # Function section
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+        # Code section
+        0x0A,
+        0x07,
+        0x01,
+        0x05,
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        opcode,  # unary operation
+        0x0B,  # end
+    ])
+
+
+def make_f64_cmp_wasm(opcode: int) -> bytes:
+    """Create WASM for: (f64, f64) -> i32 { a cmp b }"""
+    return bytes([
+        0x00,
+        0x61,
+        0x73,
+        0x6D,  # magic
+        0x01,
+        0x00,
+        0x00,
+        0x00,  # version
+        # Type section: (f64, f64) -> (i32)
+        0x01,
+        0x07,
+        0x01,
+        0x60,
+        0x02,
+        0x7C,
+        0x7C,
+        0x01,
+        0x7F,
+        # Function section
+        0x03,
+        0x02,
+        0x01,
+        0x00,
+        # Code section
+        0x0A,
+        0x09,
+        0x01,
+        0x07,
+        0x00,
+        0x20,
+        0x00,  # local.get 0
+        0x20,
+        0x01,  # local.get 1
+        opcode,  # comparison
+        0x0B,  # end
+    ])
+
+
+class TestF32Comparisons:
+    """Tests for f32 comparison operations."""
+
+    def test_f32_eq(self):
+        """Test f32.eq instruction."""
+        wasm = make_f32_cmp_wasm(0x5B)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "ceqs" in output
+
+    def test_f32_ne(self):
+        """Test f32.ne instruction."""
+        wasm = make_f32_cmp_wasm(0x5C)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cnes" in output
+
+    def test_f32_lt(self):
+        """Test f32.lt instruction."""
+        wasm = make_f32_cmp_wasm(0x5D)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "clts" in output
+
+    def test_f32_gt(self):
+        """Test f32.gt instruction."""
+        wasm = make_f32_cmp_wasm(0x5E)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cgts" in output
+
+    def test_f32_le(self):
+        """Test f32.le instruction."""
+        wasm = make_f32_cmp_wasm(0x5F)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cles" in output
+
+    def test_f32_ge(self):
+        """Test f32.ge instruction."""
+        wasm = make_f32_cmp_wasm(0x60)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cges" in output
+
+
+class TestF32Unary:
+    """Tests for f32 unary operations."""
+
+    def test_f32_abs(self):
+        """Test f32.abs instruction."""
+        wasm = make_f32_unary_wasm(0x8B)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_abs" in output
+
+    def test_f32_neg(self):
+        """Test f32.neg instruction."""
+        wasm = make_f32_unary_wasm(0x8C)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "neg" in output
+
+    def test_f32_ceil(self):
+        """Test f32.ceil instruction."""
+        wasm = make_f32_unary_wasm(0x8D)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_ceil" in output
+
+    def test_f32_floor(self):
+        """Test f32.floor instruction."""
+        wasm = make_f32_unary_wasm(0x8E)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_floor" in output
+
+    def test_f32_trunc(self):
+        """Test f32.trunc instruction."""
+        wasm = make_f32_unary_wasm(0x8F)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_trunc" in output
+
+    def test_f32_nearest(self):
+        """Test f32.nearest instruction."""
+        wasm = make_f32_unary_wasm(0x90)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_nearest" in output
+
+    def test_f32_sqrt(self):
+        """Test f32.sqrt instruction."""
+        wasm = make_f32_unary_wasm(0x91)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_sqrt" in output
+
+
+class TestF32Arithmetic:
+    """Tests for f32 arithmetic operations."""
+
+    def test_f32_add(self):
+        """Test f32.add instruction."""
+        wasm = make_f32_binary_wasm(0x92)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "add" in output
+
+    def test_f32_sub(self):
+        """Test f32.sub instruction."""
+        wasm = make_f32_binary_wasm(0x93)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "sub" in output
+
+    def test_f32_mul(self):
+        """Test f32.mul instruction."""
+        wasm = make_f32_binary_wasm(0x94)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "mul" in output
+
+    def test_f32_div(self):
+        """Test f32.div instruction."""
+        wasm = make_f32_binary_wasm(0x95)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "div" in output
+
+    def test_f32_min(self):
+        """Test f32.min instruction."""
+        wasm = make_f32_binary_wasm(0x96)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_min" in output
+
+    def test_f32_max(self):
+        """Test f32.max instruction."""
+        wasm = make_f32_binary_wasm(0x97)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_max" in output
+
+    def test_f32_copysign(self):
+        """Test f32.copysign instruction."""
+        wasm = make_f32_binary_wasm(0x98)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f32_copysign" in output
+
+
+class TestF64Comparisons:
+    """Tests for f64 comparison operations."""
+
+    def test_f64_eq(self):
+        """Test f64.eq instruction."""
+        wasm = make_f64_cmp_wasm(0x61)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "ceqd" in output
+
+    def test_f64_ne(self):
+        """Test f64.ne instruction."""
+        wasm = make_f64_cmp_wasm(0x62)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cned" in output
+
+    def test_f64_lt(self):
+        """Test f64.lt instruction."""
+        wasm = make_f64_cmp_wasm(0x63)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cltd" in output
+
+    def test_f64_gt(self):
+        """Test f64.gt instruction."""
+        wasm = make_f64_cmp_wasm(0x64)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cgtd" in output
+
+    def test_f64_le(self):
+        """Test f64.le instruction."""
+        wasm = make_f64_cmp_wasm(0x65)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cled" in output
+
+    def test_f64_ge(self):
+        """Test f64.ge instruction."""
+        wasm = make_f64_cmp_wasm(0x66)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "cged" in output
+
+
+class TestF64Unary:
+    """Tests for f64 unary operations."""
+
+    def test_f64_abs(self):
+        """Test f64.abs instruction."""
+        wasm = make_f64_unary_wasm(0x99)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_abs" in output
+
+    def test_f64_neg(self):
+        """Test f64.neg instruction."""
+        wasm = make_f64_unary_wasm(0x9A)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "neg" in output
+
+    def test_f64_ceil(self):
+        """Test f64.ceil instruction."""
+        wasm = make_f64_unary_wasm(0x9B)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_ceil" in output
+
+    def test_f64_floor(self):
+        """Test f64.floor instruction."""
+        wasm = make_f64_unary_wasm(0x9C)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_floor" in output
+
+    def test_f64_trunc(self):
+        """Test f64.trunc instruction."""
+        wasm = make_f64_unary_wasm(0x9D)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_trunc" in output
+
+    def test_f64_nearest(self):
+        """Test f64.nearest instruction."""
+        wasm = make_f64_unary_wasm(0x9E)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_nearest" in output
+
+    def test_f64_sqrt(self):
+        """Test f64.sqrt instruction."""
+        wasm = make_f64_unary_wasm(0x9F)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_sqrt" in output
+
+
+class TestF64Arithmetic:
+    """Tests for f64 arithmetic operations."""
+
+    def test_f64_add(self):
+        """Test f64.add instruction."""
+        wasm = make_f64_binary_wasm(0xA0)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "add" in output
+
+    def test_f64_sub(self):
+        """Test f64.sub instruction."""
+        wasm = make_f64_binary_wasm(0xA1)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "sub" in output
+
+    def test_f64_mul(self):
+        """Test f64.mul instruction."""
+        wasm = make_f64_binary_wasm(0xA2)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "mul" in output
+
+    def test_f64_div(self):
+        """Test f64.div instruction."""
+        wasm = make_f64_binary_wasm(0xA3)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "div" in output
+
+    def test_f64_min(self):
+        """Test f64.min instruction."""
+        wasm = make_f64_binary_wasm(0xA4)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_min" in output
+
+    def test_f64_max(self):
+        """Test f64.max instruction."""
+        wasm = make_f64_binary_wasm(0xA5)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_max" in output
+
+    def test_f64_copysign(self):
+        """Test f64.copysign instruction."""
+        wasm = make_f64_binary_wasm(0xA6)
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "__wasm_f64_copysign" in output
+
+
+class TestFloatConstants:
+    """Tests for float constant instructions."""
+
+    def test_f32_const(self):
+        """Test f32.const instruction."""
+        import struct
+
+        # f32.const 3.14
+        f32_bytes = struct.pack("<f", math.pi)
+        # Code section body: 0 locals (1), f32.const (1 + 4), end (1) = 7 bytes
+        code_body = bytes([0x00, 0x43]) + f32_bytes + bytes([0x0B])
+        code_section = bytes([0x01, len(code_body)]) + code_body
+        wasm = (
+            bytes([
+                0x00,
+                0x61,
+                0x73,
+                0x6D,  # magic
+                0x01,
+                0x00,
+                0x00,
+                0x00,  # version
+                # Type section: () -> (f32)
+                0x01,
+                0x05,
+                0x01,
+                0x60,
+                0x00,
+                0x01,
+                0x7D,
+                # Function section
+                0x03,
+                0x02,
+                0x01,
+                0x00,
+                # Code section
+                0x0A,
+                len(code_section),
+            ])
+            + code_section
+        )
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "copy" in output
+
+    def test_f64_const(self):
+        """Test f64.const instruction."""
+        import struct
+
+        # f64.const 2.718
+        f64_bytes = struct.pack("<d", math.e)
+        # Code section body: 0 locals (1), f64.const (1 + 8), end (1) = 11 bytes
+        code_body = bytes([0x00, 0x44]) + f64_bytes + bytes([0x0B])
+        code_section = bytes([0x01, len(code_body)]) + code_body
+        wasm = (
+            bytes([
+                0x00,
+                0x61,
+                0x73,
+                0x6D,  # magic
+                0x01,
+                0x00,
+                0x00,
+                0x00,  # version
+                # Type section: () -> (f64)
+                0x01,
+                0x05,
+                0x01,
+                0x60,
+                0x00,
+                0x01,
+                0x7C,
+                # Function section
+                0x03,
+                0x02,
+                0x01,
+                0x00,
+                # Code section
+                0x0A,
+                len(code_section),
+            ])
+            + code_section
+        )
+        module = parse_module(wasm)
+        qbe = compile_module(module)
+        output = qbe.emit()
+        assert "copy" in output
