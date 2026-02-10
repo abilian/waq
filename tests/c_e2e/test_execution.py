@@ -108,8 +108,12 @@ def compile_and_run(wat_file: Path, expected_result: int | None = None) -> int:
 /* Declare the exported WASM function (exported as "main" in WAT) */
 extern int wasm_main(void);
 
+/* Declare the generated init function */
+extern void __wasm_memory_init(void);
+
 int main(void) {
     __wasm_init(1);
+    __wasm_memory_init();
     int result = wasm_main();
     __wasm_fini();
     return result;
@@ -261,9 +265,11 @@ def compile_and_run_with_imports(
 #include "wasm_runtime.h"
 
 extern int {entry_func}(void);
+extern void __wasm_memory_init(void);
 
 int main(void) {{
     __wasm_init(1);
+    __wasm_memory_init();
     int result = {entry_func}();
     __wasm_fini();
     return result;
@@ -320,3 +326,38 @@ int32_t add_numbers(int32_t a, int32_t b) {
         compile_and_run_with_imports(
             wat_file, env_code, "test_import", expected_result=42
         )
+
+
+class TestStartSection:
+    """Start section tests."""
+
+    def test_start_function(self):
+        """Test that start function runs before main.
+
+        The start function increments a global counter by 10.
+        get_counter returns the counter, which should be 10.
+        """
+        wat_file = FIXTURES_DIR / "start.wat"
+        compile_and_run(wat_file, expected_result=10)
+
+
+class TestMultiValue:
+    """Multi-value return tests."""
+
+    def test_multi_value_function(self):
+        """Test function returning multiple values.
+
+        add_and_mul(3, 4) returns (7, 12).
+        wasm_main returns 7 + 12 = 19.
+        """
+        wat_file = FIXTURES_DIR / "multi_value.wat"
+        compile_and_run(wat_file, expected_result=19)
+
+    def test_multi_value_block(self):
+        """Test block returning multiple values.
+
+        Block returns (5, 7).
+        wasm_main returns 5 + 7 = 12.
+        """
+        wat_file = FIXTURES_DIR / "multi_value_block.wat"
+        compile_and_run(wat_file, expected_result=12)

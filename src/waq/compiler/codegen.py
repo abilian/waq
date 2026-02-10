@@ -204,6 +204,16 @@ def _compile_memory_init(mod_ctx: ModuleContext, qbe_module: Module) -> None:
                 )
             )
 
+    # Call start function if specified
+    if mod_ctx.module.start is not None:
+        start_func_name = mod_ctx.get_func_name(mod_ctx.module.start)
+        entry_block.instructions.append(
+            Call(
+                target=Global(start_func_name),
+                args=[],
+            )
+        )
+
     entry_block.terminator = Return(value=None)
     qbe_module.add_function(init_func)
 
@@ -339,14 +349,19 @@ def _compile_function(
         param_name = f"p{i}"
         params.append((qbe_type, param_name))
 
-    # Build return type
+    # Multi-value return: additional results are out-parameters (pointers)
+    mv_out_params = []
+    if len(func_type.results) > 1:
+        for i in range(1, len(func_type.results)):
+            out_param_name = f"retptr{i}"
+            params.append((L, out_param_name))  # All out-params are pointers (L)
+            mv_out_params.append(out_param_name)
+
+    # Build return type (first result, or None if no results)
     if not func_type.results:
         ret_type = None
-    elif len(func_type.results) == 1:
-        ret_type = _vtype_to_ir_type(func_type.results[0])
     else:
-        # Multi-value return not yet supported
-        raise CompileError("multi-value return not yet supported")
+        ret_type = _vtype_to_ir_type(func_type.results[0])
 
     # Create QBE function
     qbe_func = Function(
@@ -362,6 +377,7 @@ def _compile_function(
         locals=locals_list,
         qbe_func=qbe_func,
         stack=ValueStack(),
+        mv_out_params=mv_out_params,
     )
 
     # Create entry block
@@ -378,8 +394,11 @@ def _compile_function(
         )
         func_ctx.set_local_addr(i, addr_name)
 
-    # Store parameters into their stack slots
-    for i, (_qbe_type, param_name) in enumerate(params):
+    # Store WASM parameters into their stack slots
+    # (skip out-parameters for multi-value returns)
+    num_wasm_params = len(func_type.params)
+    for i in range(num_wasm_params):
+        _qbe_type, param_name = params[i]
         vtype = locals_list[i]
         addr_name = func_ctx.get_local_addr(i)
         store_type = _vtype_to_store_type(vtype)
@@ -417,10 +436,32 @@ def _compile_function(
     if current_block.terminator is None:
         if not func_type.results:
             current_block.terminator = Return(value=None)
-        elif func_ctx.stack.depth > 0:
-            # Return top of stack
+        elif len(func_type.results) == 1 and func_ctx.stack.depth > 0:
+            # Single return value
             value = func_ctx.stack.pop()
             current_block.terminator = Return(value=Temporary(value.name))
+        elif len(func_type.results) > 1 and func_ctx.stack.depth >= len(
+            func_type.results
+        ):
+            # Multi-value return: pop all values and store additional to out-params
+            values = func_ctx.stack.pop_n(len(func_type.results))
+
+            # Store additional results to out-parameters
+            for i in range(1, len(func_type.results)):
+                vtype = func_type.results[i]
+                value = values[i]
+                out_param = func_ctx.mv_out_params[i - 1]
+                store_type = _vtype_to_store_type(vtype)
+                current_block.instructions.append(
+                    Store(
+                        store_type=store_type,
+                        value=Temporary(value.name),
+                        address=Temporary(out_param),
+                    )
+                )
+
+            # Return first result
+            current_block.terminator = Return(value=Temporary(values[0].name))
         else:
             current_block.terminator = Return(value=None)
 

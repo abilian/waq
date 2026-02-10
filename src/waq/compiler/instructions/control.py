@@ -18,6 +18,7 @@ from qbepy.ir import (
     Load,
     Phi,
     Return,
+    Store,
     Temporary,
     W,
 )
@@ -346,8 +347,41 @@ def _emit_return(ctx: FunctionContext, block: Block) -> None:
         value = ctx.stack.pop()
         block.terminator = Return(value=Temporary(value.name))
     else:
-        # Multi-value return - Phase 3
-        raise NotImplementedError("multi-value return")
+        # Multi-value return: pop all values (in reverse order)
+        # Values are on stack with last result on top
+        values = ctx.stack.pop_n(len(result_types))
+
+        # Store additional results to out-parameters (indices 1+)
+        for i in range(1, len(result_types)):
+            vtype = result_types[i]
+            value = values[i]
+            out_param = ctx.mv_out_params[i - 1]  # 0-indexed in mv_out_params
+            store_type = _vtype_to_store_type(vtype)
+            block.instructions.append(
+                Store(
+                    store_type=store_type,
+                    value=Temporary(value.name),
+                    address=Temporary(out_param),
+                )
+            )
+
+        # Return the first result
+        block.terminator = Return(value=Temporary(values[0].name))
+
+
+def _vtype_to_store_type(vtype: ValueType) -> str:
+    """Convert WASM ValueType to QBE store type."""
+    if vtype == ValueType.I32:
+        return "storew"
+    if vtype == ValueType.I64:
+        return "storel"
+    if vtype == ValueType.F32:
+        return "stores"
+    if vtype == ValueType.F64:
+        return "stored"
+    if vtype in (ValueType.FUNCREF, ValueType.EXTERNREF):
+        return "storel"
+    raise ValueError(f"unknown value type: {vtype}")
 
 
 def _vtype_to_ir_type(vtype: ValueType):
@@ -371,6 +405,7 @@ def _emit_call(
     ctx: FunctionContext, mod_ctx: ModuleContext, block: Block, func_idx: int
 ) -> None:
     """Emit a function call."""
+    from qbepy.ir import Alloc  # noqa: PLC0415
 
     # Get function type
     func_type = ctx.module.get_func_type(func_idx)
@@ -402,8 +437,74 @@ def _emit_call(
             )
         )
     else:
-        # Multi-value return - Phase 3
-        raise NotImplementedError("multi-value return")
+        # Multi-value return: allocate stack space for additional results
+        # and pass pointers as additional arguments
+        ret_slots = []
+        for i in range(1, len(func_type.results)):
+            vtype = func_type.results[i]
+            slot_name = ctx.stack.new_temp_no_push(ValueType.I64).name
+            size = _vtype_size(vtype)
+            align = 8 if size == 8 else 4
+            block.instructions.append(
+                Alloc(result=Temporary(slot_name), size=IntConst(size), align=align)
+            )
+            # Add pointer as additional argument
+            call_args.append((L, Temporary(slot_name)))
+            ret_slots.append((slot_name, vtype))
+
+        # Emit call with first result
+        first_result = ctx.stack.new_temp(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Global(func_name),
+                args=call_args,
+                result=Temporary(first_result.name),
+                result_type=qbe_type,
+            )
+        )
+
+        # Load additional results from stack slots
+        for slot_name, vtype in ret_slots:
+            result = ctx.stack.new_temp(vtype)
+            load_type = _vtype_to_load_type(vtype)
+            block.instructions.append(
+                Load(
+                    result=Temporary(result.name),
+                    result_type=_vtype_to_ir_type(vtype),
+                    address=Temporary(slot_name),
+                )
+            )
+
+
+def _vtype_size(vtype: ValueType) -> int:
+    """Get the size in bytes of a WASM value type."""
+    if vtype == ValueType.I32:
+        return 4
+    if vtype == ValueType.I64:
+        return 8
+    if vtype == ValueType.F32:
+        return 4
+    if vtype == ValueType.F64:
+        return 8
+    if vtype in (ValueType.FUNCREF, ValueType.EXTERNREF):
+        return 8
+    raise ValueError(f"unknown value type: {vtype}")
+
+
+def _vtype_to_load_type(vtype: ValueType) -> str:
+    """Convert WASM ValueType to QBE load instruction name."""
+    if vtype == ValueType.I32:
+        return "loadw"
+    if vtype == ValueType.I64:
+        return "loadl"
+    if vtype == ValueType.F32:
+        return "loads"
+    if vtype == ValueType.F64:
+        return "loadd"
+    if vtype in (ValueType.FUNCREF, ValueType.EXTERNREF):
+        return "loadl"
+    raise ValueError(f"unknown value type: {vtype}")
 
 
 def _emit_call_indirect(ctx: FunctionContext, block: Block, type_idx: int) -> None:
@@ -496,5 +597,40 @@ def _emit_call_indirect(ctx: FunctionContext, block: Block, type_idx: int) -> No
             )
         )
     else:
-        # Multi-value return - Phase 3
-        raise NotImplementedError("multi-value return")
+        # Multi-value return: allocate stack space for additional results
+        from qbepy.ir import Alloc  # noqa: PLC0415
+
+        ret_slots = []
+        for i in range(1, len(func_type.results)):
+            vtype = func_type.results[i]
+            slot_name = ctx.stack.new_temp_no_push(ValueType.I64).name
+            size = _vtype_size(vtype)
+            align = 8 if size == 8 else 4
+            block.instructions.append(
+                Alloc(result=Temporary(slot_name), size=IntConst(size), align=align)
+            )
+            call_args.append((L, Temporary(slot_name)))
+            ret_slots.append((slot_name, vtype))
+
+        # Emit call with first result
+        first_result = ctx.stack.new_temp(func_type.results[0])
+        qbe_type = _vtype_to_ir_type(func_type.results[0])
+        block.instructions.append(
+            Call(
+                target=Temporary(func_ptr.name),
+                args=call_args,
+                result=Temporary(first_result.name),
+                result_type=qbe_type,
+            )
+        )
+
+        # Load additional results from stack slots
+        for slot_name, vtype in ret_slots:
+            result = ctx.stack.new_temp(vtype)
+            block.instructions.append(
+                Load(
+                    result=Temporary(result.name),
+                    result_type=_vtype_to_ir_type(vtype),
+                    address=Temporary(slot_name),
+                )
+            )

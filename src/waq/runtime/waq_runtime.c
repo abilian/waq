@@ -55,6 +55,36 @@ int64_t __wasm_i64_popcnt(int64_t x) {
     return __builtin_popcountll((uint64_t)x);
 }
 
+/* Rotate operations */
+
+int32_t __wasm_i32_rotl(int32_t x, int32_t y) {
+    uint32_t ux = (uint32_t)x;
+    uint32_t shift = (uint32_t)y & 31;  /* WASM specifies mod 32 */
+    if (shift == 0) return x;
+    return (int32_t)((ux << shift) | (ux >> (32 - shift)));
+}
+
+int32_t __wasm_i32_rotr(int32_t x, int32_t y) {
+    uint32_t ux = (uint32_t)x;
+    uint32_t shift = (uint32_t)y & 31;  /* WASM specifies mod 32 */
+    if (shift == 0) return x;
+    return (int32_t)((ux >> shift) | (ux << (32 - shift)));
+}
+
+int64_t __wasm_i64_rotl(int64_t x, int64_t y) {
+    uint64_t ux = (uint64_t)x;
+    uint64_t shift = (uint64_t)y & 63;  /* WASM specifies mod 64 */
+    if (shift == 0) return x;
+    return (int64_t)((ux << shift) | (ux >> (64 - shift)));
+}
+
+int64_t __wasm_i64_rotr(int64_t x, int64_t y) {
+    uint64_t ux = (uint64_t)x;
+    uint64_t shift = (uint64_t)y & 63;  /* WASM specifies mod 64 */
+    if (shift == 0) return x;
+    return (int64_t)((ux >> shift) | (ux << (64 - shift)));
+}
+
 /* Float intrinsics - f32 */
 
 float __wasm_f32_abs(float x) {

@@ -65,6 +65,10 @@ class FunctionContext:
     # Local variable stack addresses (index -> QBE temp holding address)
     local_addrs: dict[int, str] = field(default_factory=dict)
 
+    # Multi-value return: parameter names for additional results (out-parameters)
+    # Index 0 is the first additional result (result[1]), etc.
+    mv_out_params: list[str] = field(default_factory=list)
+
     # Block label counter
     _label_counter: int = 0
 
