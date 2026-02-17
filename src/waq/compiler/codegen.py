@@ -219,13 +219,25 @@ def _compile_memory_init(mod_ctx: ModuleContext, qbe_module: Module) -> None:
 
 
 def _compile_globals(mod_ctx: ModuleContext, qbe_module: Module) -> None:
-    """Compile global variable definitions."""
+    """Compile global variable definitions.
+
+    Handles global.get references by evaluating globals in dependency order.
+    """
+    # Track evaluated global values for handling global.get references
+    evaluated_globals: dict[int, int | float] = {}
+    num_imports = mod_ctx.module.num_imported_globals()
+
     for i, glob in enumerate(mod_ctx.module.globals):
-        global_name = mod_ctx.get_global_name(i + mod_ctx.module.num_imported_globals())
+        global_idx = i + num_imports
+        global_name = mod_ctx.get_global_name(global_idx)
         vtype = glob.type.value_type
 
         # Evaluate init expression to get initial value
-        init_value = _eval_init_expr(glob.init_expr, mod_ctx)
+        # Pass evaluated_globals to handle global.get references
+        init_value = _eval_init_expr(glob.init_expr, mod_ctx, evaluated_globals)
+
+        # Store the evaluated value for potential references by later globals
+        evaluated_globals[global_idx] = init_value
 
         # Create data definition
         data = DataDef(global_name)
@@ -240,10 +252,27 @@ def _compile_globals(mod_ctx: ModuleContext, qbe_module: Module) -> None:
         qbe_module.add_data(data)
 
 
-def _eval_init_expr(expr: bytes, mod_ctx: ModuleContext) -> int | float:
-    """Evaluate a constant initialization expression."""
+def _eval_init_expr(
+    expr: bytes,
+    mod_ctx: ModuleContext,
+    evaluated_globals: dict[int, int | float] | None = None,
+) -> int | float:
+    """Evaluate a constant initialization expression.
+
+    Args:
+        expr: The init expression bytecode
+        mod_ctx: Module context for lookups
+        evaluated_globals: Dictionary of already-evaluated global values
+                          (for handling global.get references)
+
+    Returns:
+        The evaluated constant value
+    """
     if not expr:
         return 0
+
+    if evaluated_globals is None:
+        evaluated_globals = {}
 
     reader = BinaryReader(expr)
     opcode = reader.read_byte()
@@ -257,9 +286,29 @@ def _eval_init_expr(expr: bytes, mod_ctx: ModuleContext) -> int | float:
     if opcode == 0x44:  # f64.const
         return reader.read_f64()
     if opcode == 0x23:  # global.get
-        _idx = reader.read_u32_leb128()
-        # For imported globals, we'd need to look up the value
-        # For now, return 0
+        global_idx = reader.read_u32_leb128()
+
+        # Check if we've already evaluated this global
+        if global_idx in evaluated_globals:
+            return evaluated_globals[global_idx]
+
+        # For imported globals, we can't know the value at compile time
+        # Return 0 as a placeholder (runtime will need to handle this)
+        num_imports = mod_ctx.module.num_imported_globals()
+        if global_idx < num_imports:
+            # Imported global - return 0 as placeholder
+            # TODO: Could emit code to load from imported global at runtime
+            return 0
+
+        # For module-defined globals, recursively evaluate their init expr
+        local_idx = global_idx - num_imports
+        if local_idx < len(mod_ctx.module.globals):
+            glob = mod_ctx.module.globals[local_idx]
+            value = _eval_init_expr(glob.init_expr, mod_ctx, evaluated_globals)
+            evaluated_globals[global_idx] = value
+            return value
+
+        # Global index out of bounds
         return 0
 
     return 0
@@ -378,6 +427,7 @@ def _compile_function(
         qbe_func=qbe_func,
         stack=ValueStack(),
         mv_out_params=mv_out_params,
+        func_name=func_name,
     )
 
     # Create entry block
@@ -426,11 +476,17 @@ def _compile_function(
     reader = BinaryReader(body.code)
 
     while not reader.at_end:
-        new_block = _compile_instruction(
-            func_ctx, mod_ctx, qbe_func, current_block, reader
-        )
-        if new_block is not None:
-            current_block = new_block
+        try:
+            new_block = _compile_instruction(
+                func_ctx, mod_ctx, qbe_func, current_block, reader
+            )
+            if new_block is not None:
+                current_block = new_block
+        except CompileError as e:
+            # Re-raise with location info if not already present
+            if e.func_idx is None:
+                raise func_ctx.make_error(str(e)) from e
+            raise
 
     # Add implicit return if needed (only if block doesn't already have a terminator)
     if current_block.terminator is None:
@@ -480,6 +536,8 @@ def _compile_instruction(
 
     Returns new current block if changed, None otherwise.
     """
+    # Track instruction offset for error reporting
+    func_ctx.instr_offset = reader.pos
     opcode = reader.read_byte()
 
     def read_operand(kind: str):
@@ -740,7 +798,7 @@ def _compile_instruction(
         sub_opcode = reader.read_u32_leb128()
         if compile_gc_instruction(sub_opcode, func_ctx, mod_ctx, block, read_operand):
             return None
-        raise CompileError(f"unhandled 0xFB sub-opcode: 0x{sub_opcode:02x}")
+        raise func_ctx.make_error(f"unhandled 0xFB sub-opcode: 0x{sub_opcode:02x}")
 
     # 0xFC prefix: bulk memory, table, saturating conversions, and other extended instructions
     if opcode == 0xFC:
@@ -756,7 +814,7 @@ def _compile_instruction(
             sub_opcode, func_ctx, mod_ctx, block, read_operand
         ):
             return None
-        raise CompileError(f"unhandled 0xFC sub-opcode: 0x{sub_opcode:02x}")
+        raise func_ctx.make_error(f"unhandled 0xFC sub-opcode: 0x{sub_opcode:02x}")
 
     # Unhandled opcode
-    raise CompileError(f"unhandled opcode: 0x{opcode:02x}")
+    raise func_ctx.make_error(f"unhandled opcode: 0x{opcode:02x}")

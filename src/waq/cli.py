@@ -25,15 +25,14 @@ def detect_target() -> str:
         if machine in ("arm64", "aarch64"):
             return "arm64_apple"
         return "amd64_apple"
-    elif system == "linux":
+    if system == "linux":
         if machine in ("arm64", "aarch64"):
             return "arm64"
-        elif machine in ("riscv64",):
+        if machine in ("riscv64",):
             return "rv64"
         return "amd64_sysv"
-    else:
-        # Default to System V ABI for unknown systems
-        return "amd64_sysv"
+    # Default to System V ABI for unknown systems
+    return "amd64_sysv"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -187,28 +186,25 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def run_qbe(qbe_il: str, target: str, verbose: bool = False) -> str:
-    """Run QBE to convert QBE IL to assembly."""
-    try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".ssa", mode="w", delete=False, encoding="utf-8"
-        ) as temp_ssa:
-            temp_ssa.write(qbe_il)
-            temp_ssa_path = temp_ssa.name
+    """Run QBE to convert QBE IL to assembly.
 
-        try:
+    Uses TemporaryDirectory for reliable cleanup even on process termination.
+    """
+    try:
+        with tempfile.TemporaryDirectory(prefix="waq_") as tmpdir:
+            temp_ssa_path = Path(tmpdir) / "input.ssa"
+            temp_ssa_path.write_text(qbe_il, encoding="utf-8")
+
             if verbose:
                 print(f"Running QBE with target {target}")
 
             result = subprocess.run(
-                ["qbe", "-t", target, temp_ssa_path],
+                ["qbe", "-t", target, str(temp_ssa_path)],
                 capture_output=True,
                 text=True,
                 check=True,
             )
             return result.stdout
-
-        finally:
-            Path(temp_ssa_path).unlink(missing_ok=True)
 
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"QBE compilation failed: {e.stderr}") from e
@@ -219,18 +215,17 @@ def run_qbe(qbe_il: str, target: str, verbose: bool = False) -> str:
 
 
 def run_assembler(asm_code: str, target: str, verbose: bool = False) -> bytes:
-    """Run the assembler to convert assembly to object file."""
+    """Run the assembler to convert assembly to object file.
+
+    Uses TemporaryDirectory for reliable cleanup even on process termination.
+    """
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".s", mode="w", delete=False, encoding="utf-8"
-        ) as temp_asm:
-            temp_asm.write(asm_code)
-            temp_asm_path = temp_asm.name
+        with tempfile.TemporaryDirectory(prefix="waq_") as tmpdir:
+            temp_asm_path = Path(tmpdir) / "input.s"
+            temp_obj_path = Path(tmpdir) / "output.o"
 
-        with tempfile.NamedTemporaryFile(suffix=".o", delete=False) as temp_obj:
-            temp_obj_path = temp_obj.name
+            temp_asm_path.write_text(asm_code, encoding="utf-8")
 
-        try:
             if verbose:
                 print("Running assembler")
 
@@ -242,20 +237,16 @@ def run_assembler(asm_code: str, target: str, verbose: bool = False) -> bytes:
                     "-c",
                     "-x",
                     "assembler",
-                    temp_asm_path,
+                    str(temp_asm_path),
                     "-o",
-                    temp_obj_path,
+                    str(temp_obj_path),
                 ]
             else:
                 # Use as on Linux/other
-                cmd = ["as", temp_asm_path, "-o", temp_obj_path]
+                cmd = ["as", str(temp_asm_path), "-o", str(temp_obj_path)]
 
             subprocess.run(cmd, capture_output=True, text=True, check=True)
-            return Path(temp_obj_path).read_bytes()
-
-        finally:
-            Path(temp_asm_path).unlink(missing_ok=True)
-            Path(temp_obj_path).unlink(missing_ok=True)
+            return temp_obj_path.read_bytes()
 
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Assembly failed: {e.stderr}") from e
@@ -269,10 +260,11 @@ def mangle_export_name(name: str) -> str:
     """Get the native symbol name for a WASM export.
 
     WASM exports are prefixed with wasm_ to avoid conflicts with C symbols,
-    except for _start which is the WASI entry point.
+    except for _start which is the WASI entry point, and names already
+    prefixed with wasm_ or __wasm_ to avoid double-prefixing.
     """
-    if name == "_start":
-        return "_start"
+    if name == "_start" or name.startswith(("wasm_", "__wasm_")):
+        return name
     return f"wasm_{name}"
 
 
@@ -321,22 +313,23 @@ def link_executable(
     *,
     print_result: bool = True,
 ) -> None:
-    """Link object file with runtime to create executable."""
+    """Link object file with runtime to create executable.
+
+    Uses TemporaryDirectory for reliable cleanup even on process termination.
+    """
     try:
-        # Write the object file to a temp location
-        with tempfile.NamedTemporaryFile(suffix=".o", delete=False) as temp_obj:
-            temp_obj.write(obj_bytes)
-            temp_obj_path = temp_obj.name
+        with tempfile.TemporaryDirectory(prefix="waq_") as tmpdir:
+            tmpdir_path = Path(tmpdir)
 
-        # Generate and write the main stub
-        main_stub = generate_main_stub(entry_function, print_result=print_result)
-        with tempfile.NamedTemporaryFile(
-            suffix=".c", mode="w", delete=False, encoding="utf-8"
-        ) as temp_main:
-            temp_main.write(main_stub)
-            temp_main_path = temp_main.name
+            # Write the object file
+            temp_obj_path = tmpdir_path / "module.o"
+            temp_obj_path.write_bytes(obj_bytes)
 
-        try:
+            # Generate and write the main stub
+            main_stub = generate_main_stub(entry_function, print_result=print_result)
+            temp_main_path = tmpdir_path / "main.c"
+            temp_main_path.write_text(main_stub, encoding="utf-8")
+
             if verbose:
                 print(f"Linking executable with entry function: {entry_function}")
 
@@ -346,8 +339,8 @@ def link_executable(
                     "clang",
                     "-o",
                     str(output_path),
-                    temp_obj_path,
-                    temp_main_path,
+                    str(temp_obj_path),
+                    str(temp_main_path),
                     str(RUNTIME_C_SOURCE),
                     "-lm",  # Link math library
                 ]
@@ -356,17 +349,13 @@ def link_executable(
                     "gcc",
                     "-o",
                     str(output_path),
-                    temp_obj_path,
-                    temp_main_path,
+                    str(temp_obj_path),
+                    str(temp_main_path),
                     str(RUNTIME_C_SOURCE),
                     "-lm",
                 ]
 
             subprocess.run(cmd, capture_output=True, text=True, check=True)
-
-        finally:
-            Path(temp_obj_path).unlink(missing_ok=True)
-            Path(temp_main_path).unlink(missing_ok=True)
 
     except subprocess.CalledProcessError as e:
         raise RuntimeError(f"Linking failed: {e.stderr}") from e
@@ -377,33 +366,29 @@ def link_executable(
 
 
 def convert_wat_to_wasm(wat_content: str) -> bytes:
-    """Convert WAT text format to WASM binary format using wat2wasm."""
+    """Convert WAT text format to WASM binary format using wat2wasm.
+
+    Uses TemporaryDirectory for reliable cleanup even on process termination.
+    """
     try:
-        with tempfile.NamedTemporaryFile(
-            suffix=".wat", mode="w", delete=False, encoding="utf-8"
-        ) as temp_wat:
-            temp_wat.write(wat_content)
-            temp_wat_path = temp_wat.name
+        with tempfile.TemporaryDirectory(prefix="waq_") as tmpdir:
+            tmpdir_path = Path(tmpdir)
 
-        with tempfile.NamedTemporaryFile(suffix=".wasm", delete=False) as temp_wasm:
-            temp_wasm_path = temp_wasm.name
+            temp_wat_path = tmpdir_path / "input.wat"
+            temp_wasm_path = tmpdir_path / "output.wasm"
 
-        try:
+            temp_wat_path.write_text(wat_content, encoding="utf-8")
+
             # Convert WAT to WASM
             subprocess.run(
-                ["wat2wasm", temp_wat_path, "-o", temp_wasm_path],
+                ["wat2wasm", str(temp_wat_path), "-o", str(temp_wasm_path)],
                 capture_output=True,
                 text=True,
                 check=True,
             )
 
             # Read the resulting WASM binary
-            return Path(temp_wasm_path).read_bytes()
-
-        finally:
-            # Clean up temporary files
-            Path(temp_wat_path).unlink(missing_ok=True)
-            Path(temp_wasm_path).unlink(missing_ok=True)
+            return temp_wasm_path.read_bytes()
 
     except (subprocess.CalledProcessError, FileNotFoundError) as e:
         raise RuntimeError(

@@ -7,7 +7,7 @@ from enum import IntEnum
 
 from waq.errors import ParseError
 
-from .binary import WASM_MAGIC, WASM_VERSION, BinaryReader
+from .binary import WASM_MAGIC, WASM_VERSION, BinaryReader, ParserLimits
 from .types import (
     ArrayType,
     CompositeType,
@@ -235,9 +235,22 @@ class WasmModule:
         return f"func_{func_idx}"
 
 
-def parse_module(data: bytes) -> WasmModule:
-    """Parse a WASM binary module."""
-    reader = BinaryReader(data)
+def parse_module(
+    data: bytes, limits: ParserLimits | None = None
+) -> WasmModule:
+    """Parse a WASM binary module.
+
+    Args:
+        data: Raw WASM binary data
+        limits: Optional parsing limits to prevent resource exhaustion
+
+    Returns:
+        Parsed WasmModule
+
+    Raises:
+        ParseError: If parsing fails or limits are exceeded
+    """
+    reader = BinaryReader(data, limits=limits)
 
     # Check magic number
     magic = reader.read_bytes(4)
@@ -416,6 +429,8 @@ def _parse_element_section(module: WasmModule, reader: BinaryReader) -> None:
 def _parse_code_section(module: WasmModule, reader: BinaryReader) -> None:
     """Parse code section."""
     count = reader.read_u32_leb128()
+    reader.check_limit(count, reader.limits.max_function_count, "function count")
+
     for _ in range(count):
         body_size = reader.read_u32_leb128()
         body_reader = reader.slice(body_size)
@@ -423,8 +438,15 @@ def _parse_code_section(module: WasmModule, reader: BinaryReader) -> None:
         # Parse locals
         num_local_decls = body_reader.read_u32_leb128()
         locals_list = []
+        total_locals = 0
         for _ in range(num_local_decls):
             local_count = body_reader.read_u32_leb128()
+            total_locals += local_count
+            if total_locals > reader.limits.max_local_count:
+                raise ParseError(
+                    f"function has {total_locals} locals, exceeds limit {reader.limits.max_local_count}",
+                    body_reader.pos,
+                )
             local_type = body_reader.read_value_type()
             locals_list.append((local_count, local_type))
 
@@ -436,17 +458,25 @@ def _parse_code_section(module: WasmModule, reader: BinaryReader) -> None:
 def _parse_data_section(module: WasmModule, reader: BinaryReader) -> None:
     """Parse data section."""
     count = reader.read_u32_leb128()
+    reader.check_limit(count, reader.limits.max_data_segments, "data segment count")
+
     for _ in range(count):
         flags = reader.read_u32_leb128()
         if flags == 0:
             # Active segment, memory 0
             offset_expr = _read_init_expr(reader)
             data_len = reader.read_u32_leb128()
+            reader.check_limit(
+                data_len, reader.limits.max_data_segment_size, "data segment size"
+            )
             data = reader.read_bytes(data_len)
             module.data.append(DataSegment(0, offset_expr, data))
         elif flags == 1:
             # Passive segment
             data_len = reader.read_u32_leb128()
+            reader.check_limit(
+                data_len, reader.limits.max_data_segment_size, "data segment size"
+            )
             data = reader.read_bytes(data_len)
             module.data.append(DataSegment(-1, b"", data))  # -1 = passive
         elif flags == 2:
@@ -454,6 +484,9 @@ def _parse_data_section(module: WasmModule, reader: BinaryReader) -> None:
             memory_idx = reader.read_u32_leb128()
             offset_expr = _read_init_expr(reader)
             data_len = reader.read_u32_leb128()
+            reader.check_limit(
+                data_len, reader.limits.max_data_segment_size, "data segment size"
+            )
             data = reader.read_bytes(data_len)
             module.data.append(DataSegment(memory_idx, offset_expr, data))
         else:
@@ -461,9 +494,14 @@ def _parse_data_section(module: WasmModule, reader: BinaryReader) -> None:
 
 
 def _read_init_expr(reader: BinaryReader) -> bytes:
-    """Read an initialization expression (ends with 0x0B)."""
+    """Read an initialization expression (ends with 0x0B).
+
+    Raises:
+        ParseError: If nesting depth exceeds limit
+    """
     start = reader.pos
     depth = 1
+    max_depth = 1
     while depth > 0:
         opcode = reader.read_byte()
         if opcode == 0x0B:  # end
@@ -471,6 +509,12 @@ def _read_init_expr(reader: BinaryReader) -> bytes:
         elif opcode in (0x02, 0x03, 0x04):  # block, loop, if
             reader.read_block_type()
             depth += 1
+            max_depth = max(max_depth, depth)
+            if depth > reader.limits.max_nesting_depth:
+                raise ParseError(
+                    f"init expression nesting depth {depth} exceeds limit {reader.limits.max_nesting_depth}",
+                    reader.pos,
+                )
         elif opcode in (0x41, 0x42):  # i32.const, i64.const
             reader.read_s64_leb128()
         elif opcode == 0x43:  # f32.const

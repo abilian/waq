@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import struct
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeVar
 
 from waq.errors import ParseError
@@ -31,12 +32,64 @@ WASM_MAGIC = b"\x00asm"
 WASM_VERSION = 1
 
 
+@dataclass(frozen=True, slots=True)
+class ParserLimits:
+    """Configurable limits for WASM parsing to prevent resource exhaustion.
+
+    All limits have sensible defaults that allow parsing legitimate WASM modules
+    while preventing denial-of-service attacks via malicious inputs.
+    """
+
+    max_vector_size: int = 1_000_000
+    """Maximum number of elements in any vector (types, functions, etc.)."""
+
+    max_function_count: int = 100_000
+    """Maximum number of functions (imports + defined)."""
+
+    max_local_count: int = 50_000
+    """Maximum number of locals per function."""
+
+    max_table_size: int = 10_000_000
+    """Maximum initial table size."""
+
+    max_memory_pages: int = 65536
+    """Maximum memory pages (each page is 64KB)."""
+
+    max_data_segments: int = 100_000
+    """Maximum number of data segments."""
+
+    max_data_segment_size: int = 100_000_000
+    """Maximum size of a single data segment (100MB)."""
+
+    max_name_length: int = 10_000
+    """Maximum length of import/export names."""
+
+    max_nesting_depth: int = 1000
+    """Maximum nesting depth for blocks in init expressions."""
+
+    max_type_params: int = 1000
+    """Maximum number of parameters in a function type."""
+
+    max_type_results: int = 1000
+    """Maximum number of results in a function type."""
+
+    max_struct_fields: int = 10_000
+    """Maximum number of fields in a struct type."""
+
+
+# Default limits instance
+DEFAULT_LIMITS = ParserLimits()
+
+
 class BinaryReader:
     """Reader for WASM binary format with LEB128 support."""
 
-    def __init__(self, data: bytes) -> None:
+    def __init__(
+        self, data: bytes, limits: ParserLimits | None = None, pos: int = 0
+    ) -> None:
         self.data = data
-        self.pos = 0
+        self.pos = pos
+        self.limits = limits or DEFAULT_LIMITS
 
     @property
     def remaining(self) -> int:
@@ -134,6 +187,11 @@ class BinaryReader:
     def read_name(self) -> str:
         """Read a UTF-8 name (length-prefixed)."""
         length = self.read_u32_leb128()
+        if length > self.limits.max_name_length:
+            raise ParseError(
+                f"name length {length} exceeds limit {self.limits.max_name_length}",
+                self.pos,
+            )
         data = self.read_bytes(length)
         try:
             return data.decode("utf-8")
@@ -238,10 +296,20 @@ class BinaryReader:
 
         # Read parameter types
         num_params = self.read_u32_leb128()
+        if num_params > self.limits.max_type_params:
+            raise ParseError(
+                f"function has {num_params} params, exceeds limit {self.limits.max_type_params}",
+                self.pos,
+            )
         params = tuple(self.read_value_type() for _ in range(num_params))
 
         # Read result types
         num_results = self.read_u32_leb128()
+        if num_results > self.limits.max_type_results:
+            raise ParseError(
+                f"function has {num_results} results, exceeds limit {self.limits.max_type_results}",
+                self.pos,
+            )
         results = tuple(self.read_value_type() for _ in range(num_results))
 
         return FuncType(params, results)
@@ -259,14 +327,29 @@ class BinaryReader:
         if tag == 0x60:
             # Function type - read params and results
             num_params = self.read_u32_leb128()
+            if num_params > self.limits.max_type_params:
+                raise ParseError(
+                    f"function has {num_params} params, exceeds limit",
+                    self.pos,
+                )
             params = tuple(self.read_value_type() for _ in range(num_params))
             num_results = self.read_u32_leb128()
+            if num_results > self.limits.max_type_results:
+                raise ParseError(
+                    f"function has {num_results} results, exceeds limit",
+                    self.pos,
+                )
             results = tuple(self.read_value_type() for _ in range(num_results))
             return FuncType(params, results)
 
         if tag == 0x5F:
             # Struct type - read fields
             num_fields = self.read_u32_leb128()
+            if num_fields > self.limits.max_struct_fields:
+                raise ParseError(
+                    f"struct has {num_fields} fields, exceeds limit {self.limits.max_struct_fields}",
+                    self.pos,
+                )
             fields = tuple(self.read_field_type() for _ in range(num_fields))
             return StructType(fields)
 
@@ -317,10 +400,41 @@ class BinaryReader:
 
         raise ParseError(f"invalid storage type: 0x{byte:02x}", self.pos - 1)
 
-    def read_vector(self, read_elem: Callable[[], T]) -> list[T]:
-        """Read a vector of elements."""
+    def read_vector(
+        self, read_elem: Callable[[], T], max_count: int | None = None
+    ) -> list[T]:
+        """Read a vector of elements.
+
+        Args:
+            read_elem: Function to read each element
+            max_count: Optional specific limit (uses max_vector_size if None)
+
+        Raises:
+            ParseError: If count exceeds the limit
+        """
         count = self.read_u32_leb128()
+        limit = max_count if max_count is not None else self.limits.max_vector_size
+        if count > limit:
+            raise ParseError(
+                f"vector size {count} exceeds limit {limit}", self.pos
+            )
         return [read_elem() for _ in range(count)]
+
+    def check_limit(self, value: int, limit: int, name: str) -> None:
+        """Check that a value doesn't exceed a limit.
+
+        Args:
+            value: The value to check
+            limit: Maximum allowed value
+            name: Human-readable name for error messages
+
+        Raises:
+            ParseError: If value exceeds limit
+        """
+        if value > limit:
+            raise ParseError(
+                f"{name} {value} exceeds limit {limit}", self.pos
+            )
 
     def skip(self, n: int) -> None:
         """Skip n bytes."""
@@ -331,4 +445,4 @@ class BinaryReader:
     def slice(self, length: int) -> BinaryReader:
         """Create a new reader for a slice of the data."""
         data = self.read_bytes(length)
-        return BinaryReader(data)
+        return BinaryReader(data, limits=self.limits)

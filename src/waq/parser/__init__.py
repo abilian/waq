@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .binary import BinaryReader
+from .binary import DEFAULT_LIMITS, BinaryReader, ParserLimits
 from .module import parse_module
 from .types import (
     FuncType,
@@ -14,11 +14,13 @@ from .types import (
 )
 
 __all__ = [
+    "DEFAULT_LIMITS",
     "BinaryReader",
     "FuncType",
     "GlobalType",
     "Limits",
     "MemoryType",
+    "ParserLimits",
     "TableType",
     "ValueType",
     "parse_module",

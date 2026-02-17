@@ -112,7 +112,8 @@ class TestCLICompilation:
         assert output_file.exists()
         content = output_file.read_text()
         assert "export" in content
-        assert "$f" in content
+        # Exported functions are prefixed with wasm_ to avoid C symbol conflicts
+        assert "$wasm_f" in content
 
     def test_default_output_name(self, minimal_wasm):
         """Test that default output has .ssa extension."""

@@ -63,7 +63,7 @@ class TestCompileEmptyModule:
         output = qbe_module.emit()
         assert "export" in output
         assert "function" in output
-        assert "$f" in output
+        assert "$wasm_f" in output  # Exported functions get wasm_ prefix
 
 
 class TestCompileConstants:
@@ -600,8 +600,9 @@ class TestModuleContext:
 
         ctx = ModuleContext(module=module)
         name = ctx.get_func_name(0)
+        # Exported functions get wasm_ prefix to avoid C symbol conflicts
         # No $ prefix - qbepy adds it
-        assert name == "my_exported_func"
+        assert name == "wasm_my_exported_func"
 
     def test_get_func_name_internal(self):
         """Test getting name for internal function."""
@@ -642,8 +643,8 @@ class TestModuleContext:
         ctx = ModuleContext(module=module)
         # First function is imported
         assert ctx.get_func_name(0) == "add_numbers"
-        # Second function is exported
-        assert ctx.get_func_name(1) == "my_func"
+        # Second function is exported (gets wasm_ prefix)
+        assert ctx.get_func_name(1) == "wasm_my_func"
 
 
 class TestFunctionContext:

@@ -14,6 +14,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
+#include <stddef.h>  /* For SIZE_MAX */
 #include <math.h>
 #include <string.h>
 
@@ -24,6 +25,96 @@
 /* Exported memory pointer - accessed by compiled WASM code */
 uint8_t *__wasm_memory = NULL;
 uint32_t __wasm_memory_size_pages = 0;
+
+/*
+ * Defense-in-depth bounds checking.
+ * Enable by compiling with -DWAQ_RUNTIME_BOUNDS_CHECK
+ * This adds runtime overhead but catches compiler bugs that could
+ * otherwise lead to memory corruption.
+ */
+#ifdef WAQ_RUNTIME_BOUNDS_CHECK
+
+static inline void __wasm_check_memory_bounds(uint64_t addr, uint32_t size) {
+    uint64_t mem_size = (uint64_t)__wasm_memory_size_pages * WASM_PAGE_SIZE;
+    if (addr > mem_size || size > mem_size - addr) {
+        fprintf(stderr, "wasm bounds check failed: addr=%llu size=%u mem_size=%llu\n",
+                (unsigned long long)addr, size, (unsigned long long)mem_size);
+        __wasm_trap_out_of_bounds();
+    }
+}
+
+/* Checked memory access functions */
+uint8_t __wasm_load_i8(uint64_t addr) {
+    __wasm_check_memory_bounds(addr, 1);
+    return __wasm_memory[addr];
+}
+
+uint16_t __wasm_load_i16(uint64_t addr) {
+    __wasm_check_memory_bounds(addr, 2);
+    uint16_t val;
+    memcpy(&val, __wasm_memory + addr, 2);
+    return val;
+}
+
+uint32_t __wasm_load_i32(uint64_t addr) {
+    __wasm_check_memory_bounds(addr, 4);
+    uint32_t val;
+    memcpy(&val, __wasm_memory + addr, 4);
+    return val;
+}
+
+uint64_t __wasm_load_i64(uint64_t addr) {
+    __wasm_check_memory_bounds(addr, 8);
+    uint64_t val;
+    memcpy(&val, __wasm_memory + addr, 8);
+    return val;
+}
+
+float __wasm_load_f32(uint64_t addr) {
+    __wasm_check_memory_bounds(addr, 4);
+    float val;
+    memcpy(&val, __wasm_memory + addr, 4);
+    return val;
+}
+
+double __wasm_load_f64(uint64_t addr) {
+    __wasm_check_memory_bounds(addr, 8);
+    double val;
+    memcpy(&val, __wasm_memory + addr, 8);
+    return val;
+}
+
+void __wasm_store_i8(uint64_t addr, uint8_t val) {
+    __wasm_check_memory_bounds(addr, 1);
+    __wasm_memory[addr] = val;
+}
+
+void __wasm_store_i16(uint64_t addr, uint16_t val) {
+    __wasm_check_memory_bounds(addr, 2);
+    memcpy(__wasm_memory + addr, &val, 2);
+}
+
+void __wasm_store_i32(uint64_t addr, uint32_t val) {
+    __wasm_check_memory_bounds(addr, 4);
+    memcpy(__wasm_memory + addr, &val, 4);
+}
+
+void __wasm_store_i64(uint64_t addr, uint64_t val) {
+    __wasm_check_memory_bounds(addr, 8);
+    memcpy(__wasm_memory + addr, &val, 8);
+}
+
+void __wasm_store_f32(uint64_t addr, float val) {
+    __wasm_check_memory_bounds(addr, 4);
+    memcpy(__wasm_memory + addr, &val, 4);
+}
+
+void __wasm_store_f64(uint64_t addr, double val) {
+    __wasm_check_memory_bounds(addr, 8);
+    memcpy(__wasm_memory + addr, &val, 8);
+}
+
+#endif /* WAQ_RUNTIME_BOUNDS_CHECK */
 
 /* Integer intrinsics */
 
@@ -198,8 +289,14 @@ int32_t __wasm_memory_grow(int32_t delta) {
     if (delta < 0) return -1;
 
     uint32_t old_pages = __wasm_memory_size_pages;
-    uint32_t new_pages = old_pages + (uint32_t)delta;
+    uint32_t delta_u = (uint32_t)delta;
 
+    /* Check for overflow BEFORE addition */
+    if (delta_u > WASM_MAX_PAGES - old_pages) return -1;
+
+    uint32_t new_pages = old_pages + delta_u;
+
+    /* Redundant check, but defensive */
     if (new_pages > WASM_MAX_PAGES) return -1;
 
     size_t new_size = (size_t)new_pages * WASM_PAGE_SIZE;
@@ -253,9 +350,18 @@ int32_t __wasm_table_grow(int32_t delta, void *init_val) {
     if (delta < 0) return -1;
 
     uint32_t old_size = __wasm_table_size;
-    uint32_t new_size = old_size + (uint32_t)delta;
+    uint32_t delta_u = (uint32_t)delta;
 
+    /* Check for overflow BEFORE addition */
+    if (delta_u > WASM_MAX_TABLE_SIZE - old_size) return -1;
+
+    uint32_t new_size = old_size + delta_u;
+
+    /* Redundant check, but defensive */
     if (new_size > WASM_MAX_TABLE_SIZE) return -1;
+
+    /* Check for allocation size overflow */
+    if (new_size > SIZE_MAX / sizeof(void *)) return -1;
 
     void **new_table = realloc(__wasm_table, new_size * sizeof(void *));
     if (new_table == NULL && new_size > 0) return -1;

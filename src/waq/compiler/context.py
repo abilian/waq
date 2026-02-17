@@ -72,6 +72,12 @@ class FunctionContext:
     # Block label counter
     _label_counter: int = 0
 
+    # Current instruction offset (for error reporting)
+    instr_offset: int = 0
+
+    # Function name (for error reporting)
+    func_name: str | None = None
+
     def new_label(self, prefix: str = "L") -> str:
         """Generate a new unique block label.
 
@@ -116,6 +122,17 @@ class FunctionContext:
             raise ValueError(f"branch depth {depth} exceeds control stack")
         # depth 0 is the innermost frame
         return self.control_stack[-(depth + 1)]
+
+    def make_error(self, message: str) -> CompileError:
+        """Create a CompileError with location information from this context."""
+        from waq.errors import CompileError
+
+        return CompileError(
+            message=message,
+            func_idx=self.func_idx,
+            instr_offset=self.instr_offset if self.instr_offset > 0 else None,
+            func_name=self.func_name,
+        )
 
 
 @dataclass
@@ -168,9 +185,11 @@ class ModuleContext:
         for exp in self.module.exports:
             if exp.kind == ExportKind.FUNC and exp.index == func_idx:
                 # Prefix exported functions with wasm_ to avoid conflicts with C symbols
-                # Exception: _start is a special WASI entry point
-                if exp.name == "_start":
-                    name = "_start"
+                # Exceptions:
+                # - _start is a special WASI entry point
+                # - Names already prefixed with wasm_ or __wasm_ to avoid double-prefixing
+                if exp.name == "_start" or exp.name.startswith(("wasm_", "__wasm_")):
+                    name = exp.name
                 else:
                     name = f"wasm_{exp.name}"
                 self.func_names[func_idx] = name

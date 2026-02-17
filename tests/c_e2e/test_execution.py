@@ -213,6 +213,13 @@ class TestGlobals:
         compile_and_run(wat_file, expected_result=4)
 
 
+def mangle_export_name(name: str) -> str:
+    """Mangle an export name to match compiler output."""
+    if name == "_start" or name.startswith(("wasm_", "__wasm_")):
+        return name
+    return f"wasm_{name}"
+
+
 def compile_and_run_with_imports(
     wat_file: Path, env_c_code: str, entry_func: str, expected_result: int | None = None
 ) -> int:
@@ -221,11 +228,13 @@ def compile_and_run_with_imports(
     Args:
         wat_file: Path to WAT file
         env_c_code: C code that provides imported functions
-        entry_func: Name of the exported function to call
+        entry_func: Name of the exported function to call (will be mangled)
         expected_result: Expected return value
 
     Returns the exit code of the program.
     """
+    # Mangle the entry function name to match compiler output
+    entry_func = mangle_export_name(entry_func)
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
 
