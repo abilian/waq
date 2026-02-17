@@ -3,6 +3,45 @@
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+
+## [0.3] - 2026/02/17
+
+### Added
+
+**Security Hardening:**
+- `ParserLimits` dataclass with configurable limits for DoS prevention:
+  - `max_vector_size`, `max_function_count`, `max_local_count`
+  - `max_data_segment_size`, `max_nesting_depth`, `max_name_length`
+- Optional runtime bounds checking via `WAQ_RUNTIME_BOUNDS_CHECK` compile flag
+- Checked memory access functions (`__wasm_load_i32`, `__wasm_store_i32`, etc.)
+
+**Validation:**
+- New `src/waq/validator/` module with `ValidationContext` and `ValidationResult`
+- Type checking, stack depth verification, and index bounds validation
+- Support for `global.get` references in initialization expressions
+
+**Error Reporting:**
+- `CompileError` now includes `func_idx`, `instr_offset`, and `func_name`
+- `FunctionContext.make_error()` helper for location-aware errors
+
+**Testing:**
+- Fuzzing infrastructure in `tests/fuzz/`:
+  - `fuzz_parser.py` - Parser fuzzing target for Atheris
+  - `fuzz_compiler.py` - Compiler fuzzing target
+  - `create_corpus.py` - Corpus generation from test fixtures
+- Negative testing for parser (`test_parser_negative.py`) and compiler (`test_compiler_negative.py`)
+- Test coverage improved to 456 tests
+
+### Fixed
+
+- Integer overflow in `__wasm_memory_grow()` and `__wasm_table_grow()`
+- Temporary file cleanup using `TemporaryDirectory` instead of `NamedTemporaryFile(delete=False)`
+- Export name mangling avoids double-prefixing names already starting with `wasm_` or `__wasm_`
+
+### Known Limitations
+
+- QBE has a 63-character identifier limit; Rust-generated WASM may exceed this
+
 ## [0.2.0] - 2026/02/10
 
 ### Added
@@ -65,4 +104,3 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026/02/07
 
 Initial release.
-

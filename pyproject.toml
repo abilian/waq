@@ -1,6 +1,6 @@
 [project]
 name = "waq"
-version = "0.2.0"
+version = "0.3.0"
 description = "Add your description here"
 readme = "README.md"
 authors = [
@@ -32,4 +32,7 @@ dev = [
     "pytest-cov>=7.0.0",
     "ruff>=0.15.0",
     "ty>=0.0.15",
+]
+fuzz = [
+    "atheris>=2.3.0",
 ]

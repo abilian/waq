@@ -20,3 +20,8 @@ wheels/
 
 # Polyglot test compiled files
 tests/d_polyglot/compiled/
+
+# Fuzzing corpus and artifacts
+tests/fuzz/corpus/
+tests/fuzz/crashes/
+tests/fuzz/artifacts/
